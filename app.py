@@ -887,7 +887,7 @@ def process_embedding_queue():
 # PHASE 3+: UNIFIED SEARCH SYSTEM
 # ================================
 
-def unified_search(query_text, embedding_model_instance, n_results=5, include_notes=True):
+def unified_search(query_text, embedding_model_instance, n_results=10, include_notes=True):
     """Search across both products and notes with unified results"""
     if not embedding_model_instance:
         return {"products": [], "notes": [], "error": "Embedding model not available"}
@@ -1917,7 +1917,7 @@ if st.button("🚀 Phase 3+ Unified Search (Products + Notes)", type="primary"):
                 unified_results = unified_search(
                     query_text, 
                     embedding_model, 
-                    n_results=5, 
+                    n_results=10, 
                     include_notes=enable_unified_search
                 )
                 
