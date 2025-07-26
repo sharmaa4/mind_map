@@ -57,14 +57,12 @@ def initial_sync():
     """
     try:
         drive = gds.authenticate_gdrive()
-        # The root folder in your Google Drive where data will be stored
-        drive_folder_name = "MindMapApp_Data" 
         
         # Sync the notes directory (contains SQLite DB and .txt files)
-        gds.sync_directory_from_drive(drive, "notes", drive_folder_name)
+        gds.sync_directory_from_drive(drive, "notes")
         
         # Sync the pre-computed product embeddings
-        gds.sync_directory_from_drive(drive, "product_embeddings_v2", drive_folder_name)
+        gds.sync_directory_from_drive(drive, "product_embeddings_v2")
         
         return drive
     except Exception as e:
@@ -431,11 +429,10 @@ Links: {links}
     conn.commit()
     conn.close()
 
-    # --- ADDED FOR GOOGLE DRIVE SYNC ---
-    # After saving locally, sync the entire notes directory to Google Drive
+    # --- GOOGLE DRIVE SYNC ---
     if 'drive_instance' in st.session_state and st.session_state.drive_instance:
         with st.spinner("Syncing new note to Google Drive..."):
-            gds.sync_directory_to_drive(st.session_state.drive_instance, "notes", "MindMapApp_Data")
+            gds.sync_directory_to_drive(st.session_state.drive_instance, "notes")
     # --- END GOOGLE DRIVE SYNC ---
     
     return note_id, str(content_path)
@@ -673,10 +670,10 @@ Links: {links}
     conn.commit()
     conn.close()
 
-    # --- ADDED FOR GOOGLE DRIVE SYNC ---
+    # --- GOOGLE DRIVE SYNC ---
     if 'drive_instance' in st.session_state and st.session_state.drive_instance:
         with st.spinner("Syncing updated note to Google Drive..."):
-            gds.sync_directory_to_drive(st.session_state.drive_instance, "notes", "MindMapApp_Data")
+            gds.sync_directory_to_drive(st.session_state.drive_instance, "notes")
     # --- END GOOGLE DRIVE SYNC ---
 
 def delete_note(note_id):
@@ -715,10 +712,10 @@ def delete_note(note_id):
     
     conn.close()
     
-    # --- ADDED FOR GOOGLE DRIVE SYNC ---
+    # --- GOOGLE DRIVE SYNC ---
     if 'drive_instance' in st.session_state and st.session_state.drive_instance:
         with st.spinner("Syncing deletion to Google Drive..."):
-            gds.sync_directory_to_drive(st.session_state.drive_instance, "notes", "MindMapApp_Data")
+            gds.sync_directory_to_drive(st.session_state.drive_instance, "notes")
     # --- END GOOGLE DRIVE SYNC ---
 
 
