@@ -23,7 +23,6 @@ def authenticate_gdrive():
     if 'gcp_service_account' in st.secrets:
         print("Authenticating using Streamlit Secrets (Service Account)...")
         try:
-            # Use service account credentials from st.secrets
             creds = ServiceAccountCredentials.from_json_keyfile_dict(
                 st.secrets["gcp_service_account"], scope
             )
@@ -49,23 +48,27 @@ def authenticate_gdrive():
     
     return GoogleDrive(gauth)
 
-# --- Core Drive Operations (No changes needed below this line) ---
-def get_folder_id(drive, folder_name, parent_folder_id='root'):
+# --- Core Drive Operations ---
+def get_folder_id(drive, folder_name):
     """
-    Finds a folder's ID by its name within a parent folder.
-    If the folder doesn't exist, it creates it.
+    Finds a folder's ID by its name within the designated parent folder.
+    If it doesn't exist, it creates it there.
     """
-    query = f"'{parent_folder_id}' in parents and title='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    # The top-level folder where all app data is stored.
+    # For deployed app, this comes from secrets. For local, it's the root 'My Drive'.
+    parent_id = st.secrets.get("parent_folder_id", "root")
+
+    query = f"'{parent_id}' in parents and title='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
     folder_list = drive.ListFile({'q': query}).GetList()
     
     if folder_list:
         return folder_list[0]['id']
     else:
-        print(f"Folder '{folder_name}' not found in Google Drive. Creating it...")
+        print(f"Folder '{folder_name}' not found in parent. Creating it...")
         folder_metadata = {
             'title': folder_name, 
             'mimeType': 'application/vnd.google-apps.folder', 
-            'parents': [{'id': parent_folder_id}]
+            'parents': [{'id': parent_id}]
         }
         folder = drive.CreateFile(folder_metadata)
         folder.Upload()
@@ -74,15 +77,17 @@ def get_folder_id(drive, folder_name, parent_folder_id='root'):
 def sync_directory_to_drive(drive, local_path, drive_folder_name):
     """
     Zips a local directory and uploads it to a specific folder in Google Drive.
-    It will overwrite the existing zip file with the same name.
     """
     if not os.path.isdir(local_path):
         print(f"Local path '{local_path}' does not exist. Skipping upload.")
         return
 
+    # This function now correctly finds or creates the subfolder (e.g., "MindMapApp_Data")
+    # inside the main parent folder specified in your secrets.
     drive_folder_id = get_folder_id(drive, drive_folder_name)
     
     file_name = f"{os.path.basename(local_path)}.zip"
+    
     query = f"'{drive_folder_id}' in parents and title='{file_name}' and trashed=false"
     file_list = drive.ListFile({'q': query}).GetList()
 
@@ -117,7 +122,7 @@ def sync_directory_from_drive(drive, local_path, drive_folder_name):
     file_list = drive.ListFile({'q': query}).GetList()
 
     if not file_list:
-        print(f"No '{file_name}' found in Google Drive folder '{drive_folder_name}'. Starting with a fresh local directory.")
+        print(f"No '{file_name}' found in Drive folder '{drive_folder_name}'. Starting with a fresh local directory.")
         os.makedirs(local_path, exist_ok=True)
         return False
 
