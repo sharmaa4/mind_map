@@ -2,6 +2,7 @@
 import streamlit as st
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
+from oauth2client.service_account import ServiceAccountCredentials
 import os
 import zipfile
 import io
@@ -12,22 +13,27 @@ import json
 def authenticate_gdrive():
     """
     Handles Google authentication.
-    - Uses Service Account credentials when deployed on Streamlit Cloud.
-    - Uses local webserver auth for local development.
+    - Uses Service Account credentials from Streamlit Secrets when deployed.
+    - Uses local webserver auth (OAuth) for local development.
     """
     gauth = GoogleAuth()
-    
-    # Check if running on Streamlit Cloud
+    scope = ["https://www.googleapis.com/auth/drive"]
+
+    # Check if running on Streamlit Cloud and secrets are available
     if 'gcp_service_account' in st.secrets:
         print("Authenticating using Streamlit Secrets (Service Account)...")
-        # Use service account credentials from st.secrets
-        gauth.auth_method = 'service'
-        gauth.credentials = gauth.get_credentials_from_service_account_info(
-            st.secrets["gcp_service_account"]
-        )
+        try:
+            # Use service account credentials from st.secrets
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(
+                st.secrets["gcp_service_account"], scope
+            )
+            gauth.credentials = creds
+        except Exception as e:
+            print(f"Service account authentication failed: {e}")
+            raise
     else:
+        # Fallback to local webserver authentication for local development
         print("Authenticating using local webserver method...")
-        # Use local webserver authentication (requires client_secrets.json)
         gauth.auth_method = 'local'
         gauth.LoadClientConfigFile("client_secrets.json")
         gauth.LoadCredentialsFile("mycreds.txt")
