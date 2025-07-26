@@ -6,3 +6,4 @@ pymupdf
 chromadb
 streamlit
 tqdm
+pydrive2

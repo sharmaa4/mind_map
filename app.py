@@ -33,9 +33,58 @@ import base64
 import threading
 from typing import List, Dict, Any
 
+# --- ADDED FOR GOOGLE DRIVE SYNC ---
+import google_drive_sync as gds
+# --- END GOOGLE DRIVE SYNC ---
+
 # Configure the Streamlit page
 st.set_page_config(page_title="Global Product Search + Advanced Note Management", layout="wide")
 st.title("🚀 Global Product Search + Advanced Note-Taking System (Phase 3+)")
+
+# --- ADDED FOR GOOGLE DRIVE SYNC ---
+# Initialize session state for sync status
+if 'drive_synced' not in st.session_state:
+    st.session_state.drive_synced = False
+if 'drive_instance' not in st.session_state:
+    st.session_state.drive_instance = None
+
+# Function to run the initial sync from Google Drive
+@st.cache_resource(show_spinner="Connecting to Google Drive and syncing data...")
+def initial_sync():
+    """
+    Authenticates with Google Drive and downloads the 'notes' and 
+    'product_embeddings_v2' directories. This runs only once.
+    """
+    try:
+        drive = gds.authenticate_gdrive()
+        # The root folder in your Google Drive where data will be stored
+        drive_folder_name = "MindMapApp_Data" 
+        
+        # Sync the notes directory (contains SQLite DB and .txt files)
+        gds.sync_directory_from_drive(drive, "notes", drive_folder_name)
+        
+        # Sync the pre-computed product embeddings
+        gds.sync_directory_from_drive(drive, "product_embeddings_v2", drive_folder_name)
+        
+        return drive
+    except Exception as e:
+        st.error(f"Fatal Error: Could not sync with Google Drive. Please check credentials. Details: {e}")
+        return None
+
+# Perform the initial sync when the app starts
+if not st.session_state.drive_synced:
+    drive = initial_sync()
+    if drive:
+        st.session_state.drive_synced = True
+        st.session_state.drive_instance = drive
+        st.sidebar.success("✅ Synced with Google Drive!")
+        # Rerun to ensure the rest of the app loads with the synced data
+        st.rerun() 
+    else:
+        st.sidebar.error("❌ Google Drive sync failed. App cannot continue.")
+        st.stop() # Stop the app if sync fails
+# --- END GOOGLE DRIVE SYNC ---
+
 
 # Add migration success notice
 st.sidebar.success("🎉 Phase 3+: Complete Knowledge Management!")
@@ -381,6 +430,13 @@ Links: {links}
     
     conn.commit()
     conn.close()
+
+    # --- ADDED FOR GOOGLE DRIVE SYNC ---
+    # After saving locally, sync the entire notes directory to Google Drive
+    if 'drive_instance' in st.session_state and st.session_state.drive_instance:
+        with st.spinner("Syncing new note to Google Drive..."):
+            gds.sync_directory_to_drive(st.session_state.drive_instance, "notes", "MindMapApp_Data")
+    # --- END GOOGLE DRIVE SYNC ---
     
     return note_id, str(content_path)
 
@@ -617,6 +673,12 @@ Links: {links}
     conn.commit()
     conn.close()
 
+    # --- ADDED FOR GOOGLE DRIVE SYNC ---
+    if 'drive_instance' in st.session_state and st.session_state.drive_instance:
+        with st.spinner("Syncing updated note to Google Drive..."):
+            gds.sync_directory_to_drive(st.session_state.drive_instance, "notes", "MindMapApp_Data")
+    # --- END GOOGLE DRIVE SYNC ---
+
 def delete_note(note_id):
     """Delete a note from database and file system"""
     db_path = Path("notes") / "metadata" / "notes_database.db"
@@ -652,6 +714,13 @@ def delete_note(note_id):
         conn.commit()
     
     conn.close()
+    
+    # --- ADDED FOR GOOGLE DRIVE SYNC ---
+    if 'drive_instance' in st.session_state and st.session_state.drive_instance:
+        with st.spinner("Syncing deletion to Google Drive..."):
+            gds.sync_directory_to_drive(st.session_state.drive_instance, "notes", "MindMapApp_Data")
+    # --- END GOOGLE DRIVE SYNC ---
+
 
 # ================================
 # CHROMADB LOCAL COLLECTION SETUP
@@ -659,6 +728,8 @@ def delete_note(note_id):
 
 @st.cache_resource(show_spinner=False)
 def get_chroma_client(persist_directory="./db_local/"):
+    # Ensure the directory exists after a sync
+    os.makedirs(persist_directory, exist_ok=True)
     client = chromadb.PersistentClient(
         path=persist_directory,
         settings=Settings()
@@ -670,14 +741,14 @@ def get_local_chroma_collection(embedding_dimension=384):
     client = get_chroma_client()
     collection_name = f"analog_products_local_{embedding_dimension}d"
     try:
-        collection = client.get_collection(name=collection_name)
-        st.info(f"✅ Using local collection: {collection_name}")
-    except:
-        collection = client.create_collection(
+        collection = client.get_or_create_collection(
             name=collection_name,
             embedding_function=None
         )
-        st.success(f"✅ Created new local collection: {collection_name}")
+        st.info(f"✅ Using local collection: {collection_name}")
+    except Exception as e:
+        st.error(f"Error getting Chroma collection: {e}")
+        return None
     return collection
 
 @st.cache_resource(show_spinner=False)
@@ -686,14 +757,14 @@ def get_notes_chroma_collection(embedding_dimension=384):
     client = get_chroma_client()
     collection_name = f"user_notes_local_{embedding_dimension}d"
     try:
-        collection = client.get_collection(name=collection_name)
-        st.info(f"✅ Using notes collection: {collection_name}")
-    except:
-        collection = client.create_collection(
+        collection = client.get_or_create_collection(
             name=collection_name,
             embedding_function=None
         )
-        st.success(f"✅ Created new notes collection: {collection_name}")
+        st.info(f"✅ Using notes collection: {collection_name}")
+    except Exception as e:
+        st.error(f"Error getting notes collection: {e}")
+        return None
     return collection
 
 # ================================
