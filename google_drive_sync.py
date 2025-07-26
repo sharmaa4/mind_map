@@ -55,7 +55,7 @@ def get_folder_id(drive, folder_name):
     If it doesn't exist, it creates it there.
     """
     # The top-level folder where all app data is stored.
-    # For deployed app, this comes from secrets. For local, it's the root 'My Drive'.
+    # For a deployed app, this comes from secrets. For local, it's the root 'My Drive'.
     parent_id = st.secrets.get("parent_folder_id", "root")
 
     query = f"'{parent_id}' in parents and title='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
@@ -82,7 +82,7 @@ def sync_directory_to_drive(drive, local_path, drive_folder_name):
         print(f"Local path '{local_path}' does not exist. Skipping upload.")
         return
 
-    # This function now correctly finds or creates the subfolder (e.g., "MindMapApp_Data")
+    # This function correctly finds or creates the subfolder (e.g., "MindMapApp_Data")
     # inside the main parent folder specified in your secrets.
     drive_folder_id = get_folder_id(drive, drive_folder_name)
     
