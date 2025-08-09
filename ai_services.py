@@ -45,6 +45,53 @@ def create_streaming_puter_component(prompt: str, model: str = "gpt-4o-mini", st
     escaped_prompt = json.dumps(prompt)
     unique_id = f"puter-component-{int(time.time() * 1000)}"
 
+    # --- CORRECTED IMPLEMENTATION ---
+    # 1. Define the JavaScript code as a separate template string. This prevents Python's f-string parser from touching it.
+    js_template = """
+        async function processQuery() {{
+            const resultDiv = document.getElementById('{unique_id}');
+            const statsDiv = document.getElementById('{unique_id}-stats');
+            const prompt = {escaped_prompt};
+            const modelName = "{model}";
+            const streamingEnabled = {stream_bool};
+            
+            try {{
+                const startTime = Date.now();
+                if (streamingEnabled) {{
+                    resultDiv.innerHTML = '';
+                    const response = await puter.ai.chat(prompt, {{ model: modelName, stream: true }});
+                    let fullResponse = '';
+                    for await (const chunk of response) {{
+                        const content = chunk?.text || '';
+                        if (content) {{
+                            fullResponse += content;
+                            resultDiv.innerText = fullResponse;
+                        }}
+                    }}
+                    const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                    statsDiv.innerText = `✅ Stream complete in: ${{totalTime}}s`;
+                }} else {{
+                    const response = await puter.ai.chat(prompt, {{ model: modelName, stream: false }});
+                    resultDiv.innerText = response;
+                    const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                    statsDiv.innerText = `✅ Completed in: ${{totalTime}}s`;
+                }}
+            }} catch (error) {{
+                resultDiv.innerText = `❌ An error occurred: ${{error.message}}`;
+                console.error("Puter.js error:", error);
+            }}
+        }}
+        processQuery();
+    """
+
+    # 2. Safely inject the Python variables into the JavaScript template using .format()
+    js_code = js_template.format(
+        unique_id=unique_id,
+        escaped_prompt=escaped_prompt,
+        model=model,
+        stream_bool=str(stream).lower()
+    )
+
     puter_html = f"""
     <!DOCTYPE html>
     <html>
@@ -66,43 +113,7 @@ def create_streaming_puter_component(prompt: str, model: str = "gpt-4o-mini", st
             <div id="{unique_id}-stats" class="stats"></div>
         </div>
         <script>
-            async function processQuery() {{
-                const resultDiv = document.getElementById('{unique_id}');
-                const statsDiv = document.getElementById('{unique_id}-stats');
-                const prompt = {escaped_prompt};
-                const modelName = "{model}";
-                const streamingEnabled = {str(stream).lower()};
-                
-                try {{
-                    const startTime = Date.now();
-                    if (streamingEnabled) {{
-                        resultDiv.innerHTML = '';
-                        const response = await puter.ai.chat(prompt, {{ model: modelName, stream: true }});
-                        let fullResponse = '';
-                        for await (const chunk of response) {{
-                            const content = chunk?.text || '';
-                            if (content) {{
-                                fullResponse += content;
-                                resultDiv.innerText = fullResponse;
-                            }}
-                        }}
-                        const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                        { # FIX 1: Escaped the curly braces for JavaScript variables # }
-                        statsDiv.innerText = `✅ Stream complete in: ${{totalTime}}s`;
-                    }} else {{
-                        const response = await puter.ai.chat(prompt, {{ model: modelName, stream: false }});
-                        resultDiv.innerText = response;
-                        const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                        { # FIX 2: Escaped the curly braces for JavaScript variables # }
-                        statsDiv.innerText = `✅ Completed in: ${{totalTime}}s`;
-                    }}
-                }} catch (error) {{
-                    { # FIX 3: Escaped the curly braces for JavaScript variables # }
-                    resultDiv.innerText = `❌ An error occurred: ${{error.message}}`;
-                    console.error("Puter.js error:", error);
-                }}
-            }}
-            processQuery();
+            {js_code}
         </script>
     </body>
     </html>
