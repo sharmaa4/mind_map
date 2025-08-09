@@ -16,7 +16,6 @@ def build_context_prompt(
     """
     Builds a comprehensive prompt for the AI, including conversation history and retrieved context.
     """
-    # Start with conversation history if available
     if conversation_history:
         context_messages = ""
         for msg in conversation_history[-max_context_messages:]:
@@ -29,10 +28,8 @@ Current Query: {user_query}"""
     else:
         base_prompt = f"User Query: {user_query}"
 
-    # Add the context from retrieved documents
     base_prompt += f"\n\nDocument Context:\n{document_context}"
     
-    # Add the context from personal notes if available
     if note_context:
         base_prompt += f"\n\nPersonal Notes Context:\n{note_context}"
         base_prompt += "\n\nPlease respond by synthesizing information from the document context and the user's personal notes."
@@ -48,8 +45,6 @@ def create_streaming_puter_component(prompt: str, model: str = "gpt-4o-mini", st
     escaped_prompt = json.dumps(prompt)
     unique_id = f"puter-component-{int(time.time() * 1000)}"
 
-    # This HTML and JavaScript code is embedded directly into the Streamlit app.
-    # It calls the puter.ai.chat API and updates the UI in real-time.
     puter_html = f"""
     <!DOCTYPE html>
     <html>
@@ -92,20 +87,17 @@ def create_streaming_puter_component(prompt: str, model: str = "gpt-4o-mini", st
                             }}
                         }}
                         const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                        {
-                            # CORRECTED LINE
-                        }
+                        { # FIX: Escaped the curly braces for JavaScript variables # }
                         statsDiv.innerText = `✅ Stream complete in: ${{totalTime}}s`;
                     }} else {{
                         const response = await puter.ai.chat(prompt, {{ model: modelName, stream: false }});
                         resultDiv.innerText = response;
                         const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                        {
-                            # CORRECTED LINE
-                        }
-                        statsDiv.innerText = `✅ Completed in: ${{processingTime}}s`;
+                        { # FIX: Escaped the curly braces for JavaScript variables # }
+                        statsDiv.innerText = `✅ Completed in: ${{totalTime}}s`;
                     }}
                 }} catch (error) {{
+                    { # FIX: Escaped the curly braces for JavaScript variables # }
                     resultDiv.innerText = `❌ An error occurred: ${{error.message}}`;
                     console.error("Puter.js error:", error);
                 }}
