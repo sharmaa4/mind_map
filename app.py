@@ -1,10 +1,12 @@
 # app.py
 
-# --- FIX: Apply the pysqlite3 patch BEFORE any other imports ---
+# --- FIX: Apply the pysqlite3 patch and disable telemetry BEFORE any other imports ---
+import os
+os.environ["CHROMADB_DISABLE_TELEMETRY"] = "true"  # Disable telemetry to prevent warnings
 import pysqlite3
 import sys
 sys.modules["sqlite3"] = pysqlite3
-# ----------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 import streamlit as st
 import time
