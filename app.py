@@ -85,7 +85,8 @@ def main():
         col1, col2 = st.sidebar.columns(2)
         col1.metric("Total Notes", stats.get("total_notes", 0))
         col2.metric("Need Embedding", stats.get("needs_embedding", 0))
-        # --- REMOVED: Manual embedding button is no longer needed ---
+        if stats.get("pending_jobs", 0) > 0:
+            st.sidebar.info(f"{stats.get('pending_jobs', 0)} notes are being processed...")
 
     with st.sidebar.expander("✨ Create Advanced Note"):
         note_type = st.selectbox("Category:", list(db.NOTE_CATEGORIES.keys()), format_func=lambda x: f"{db.NOTE_CATEGORIES[x]['emoji']} {x.replace('_', ' ').title()}")
@@ -98,12 +99,10 @@ def main():
                 note_id, _ = db.save_advanced_note(note_type, note_title, note_content, note_links, note_tags)
                 st.success(f"Note saved! ID: {note_id}. Generating embeddings...")
                 
-                # --- FIX: Automatically process embeddings for the new note ---
                 with st.spinner("Processing new note..."):
                     processed_count = emb.process_embedding_queue(embedding_model, embedding_model_name, notes_collection)
                     if processed_count > 0:
                         st.success(f"Embeddings generated for new note!")
-                # --- END FIX ---
                 
                 gds.sync_directory_to_drive(st.session_state.drive_instance, "notes")
                 st.rerun()
@@ -184,7 +183,6 @@ if not st.session_state.drive_synced:
         st.session_state.drive_synced = True
         st.session_state.drive_instance = drive_instance
 
-        # --- FIX: Automatically scan and process embeddings after sync ---
         with st.spinner("Scanning for new notes and updating embeddings..."):
             db.scan_and_queue_new_notes()
             embedding_model = emb.load_embedding_model("BAAI/bge-small-en-v1.5")
@@ -193,7 +191,6 @@ if not st.session_state.drive_synced:
                 processed_count = emb.process_embedding_queue(embedding_model, "BAAI/bge-small-en-v1.5", notes_collection)
                 if processed_count > 0:
                     st.success(f"Automatically processed {processed_count} synced notes.")
-        # --- END FIX ---
         
         st.cache_resource.clear()
         st.rerun()
