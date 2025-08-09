@@ -84,7 +84,6 @@ if stats:
     col2.metric("Need Embedding", stats.get("needs_embedding", 0))
     if stats.get("pending_jobs", 0) > 0 and st.sidebar.button("🚀 Process Embedding Queue"):
         with st.sidebar:
-            # FIX: Added the missing 'notes_collection' argument to the function call
             processed_count = emb.process_embedding_queue(embedding_model, embedding_model_name, notes_collection)
             st.success(f"Processed {processed_count} notes.")
             st.rerun()
@@ -119,8 +118,15 @@ if st.button("🚀 Unified Search", type="primary"):
                 st.warning("No relevant results found.")
             else:
                 st.success("Search complete! Generating AI summary...")
-                product_context = "\n".join([r['content'] for r in results['combined'] if r['source'] == 'product'])
-                note_context = "\n".join([r['content'] for r in results['combined'] if r['source'] == 'note'])
+                
+                # --- MODIFICATION ---
+                # Filter results by source and build separate context strings
+                all_products = [r for r in results['combined'] if r['source'] == 'product']
+                all_notes = [r for r in results['combined'] if r['source'] == 'note']
+                
+                # Build context, taking the content of the top 15 most relevant notes
+                product_context = "\n\n".join([p['content'] for p in all_products])
+                note_context = "\n\n".join([n['content'] for n in all_notes[:15]]) # Slice for top 15 notes
 
                 ai_services.get_ai_response(
                     user_query=query_text, document_context=product_context, note_context=note_context,
