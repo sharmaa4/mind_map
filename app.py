@@ -98,27 +98,58 @@ with st.sidebar.expander("✨ Create Advanced Note"):
         if note_title and note_content:
             note_id, _ = db.save_advanced_note(note_type, note_title, note_content, note_links, note_tags)
             st.success(f"Note saved! ID: {note_id}")
-            gds.sync_directory_to_drive(st.session_state.drive_instance, "notes") # Sync on change
+            gds.sync_directory_to_drive(st.session_state.drive_instance, "notes")
             st.rerun()
         else:
             st.warning("Please provide a title and content.")
 
+# Note Management Expander
+with st.sidebar.expander("🗂️ Manage All Notes"):
+    if st.button("📋 Show All Notes Manager"):
+        st.session_state.show_note_manager = True
+        st.rerun()
+
 # --- Main Page UI ---
+
+# Note Manager Display Logic
+if st.session_state.show_note_manager:
+    st.header("🗂️ Comprehensive Note Manager")
+    if st.button("❌ Close Note Manager"):
+        st.session_state.show_note_manager = False
+        st.rerun()
+
+    all_notes = db.get_all_notes_with_details()
+    if not all_notes:
+        st.info("No notes found. Create one from the sidebar!")
+    else:
+        for note in all_notes:
+            with st.expander(f"{db.NOTE_CATEGORIES[note['type']]['emoji']} {note['title']}"):
+                # Display note details (as before)
+                st.write(f"**Type:** {note['type'].replace('_', ' ').title()}")
+                st.write(f"**Last Modified:** {note['last_modified'][:19]}")
+                st.write(f"**Embedding Status:** {'✅ Ready' if note['has_embedding'] else '⏳ Pending'}")
+
+                # --- FIX: Integrated deletion logic for both databases ---
+                if st.button("🗑️ Delete Note", key=f"delete_{note['id']}"):
+                    db.delete_note(note['id'])
+                    vdb.delete_note_embedding([note['id']], notes_collection)
+                    gds.sync_directory_to_drive(st.session_state.drive_instance, "notes")
+                    st.success(f"Note '{note['title']}' and its embeddings have been deleted.")
+                    st.rerun()
+
 st.header("🔍 Unified Search (Products & Notes)")
 query_text = st.text_input("Enter your search query:", placeholder="Search across datasheets and your personal notes...")
 
 if st.button("🚀 Unified Search", type="primary"):
     if query_text and embedding_model:
         with st.spinner("Performing unified search..."):
-            # --- MODIFICATION ---
-            # Increase n_results to fetch a larger pool of candidates
             results = search.unified_search(
                 query_text, 
                 embedding_model, 
                 products_collection, 
                 notes_collection, 
                 note_context_weight, 
-                n_results=20, # Fetch more results to ensure enough notes are available
+                n_results=20, # Fetch a larger pool of candidates
                 include_notes=enable_unified_search
             )
             
@@ -133,7 +164,7 @@ if st.button("🚀 Unified Search", type="primary"):
                 all_notes = [r for r in results['combined'] if r['source'] == 'note']
                 
                 product_context = "\n\n".join([p['content'] for p in all_products])
-                note_context = "\n\n".join([n['content'] for n in all_notes[:15]]) # Now this slice is meaningful
+                note_context = "\n\n".join([n['content'] for n in all_notes[:15]]) # Slice for top 15 notes
 
                 ai_services.get_ai_response(
                     user_query=query_text, document_context=product_context, note_context=note_context,

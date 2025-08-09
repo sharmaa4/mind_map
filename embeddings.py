@@ -12,9 +12,6 @@ from typing import List, Optional
 
 @st.cache_resource(show_spinner=True)
 def load_embedding_model(model_name: str = "BAAI/bge-small-en-v1.5") -> Optional[SentenceTransformer]:
-    """
-    Loads a local Sentence Transformer model and caches it.
-    """
     try:
         with st.spinner(f"Loading embedding model: {model_name}..."):
             model = SentenceTransformer(model_name)
@@ -25,13 +22,9 @@ def load_embedding_model(model_name: str = "BAAI/bge-small-en-v1.5") -> Optional
         return None
 
 def get_query_embedding_local(query_text: str, model: SentenceTransformer) -> Optional[list]:
-    """
-    Generates a vector embedding for a given query text using a local model.
-    """
     if model is None:
         st.error("❌ Embedding model is not available for query processing.")
         return None
-    
     try:
         embedding = model.encode(query_text, normalize_embeddings=True)
         return embedding.tolist()
@@ -42,14 +35,11 @@ def get_query_embedding_local(query_text: str, model: SentenceTransformer) -> Op
 # --- Note Embedding Generation and Queue Management ---
 
 def generate_note_embeddings_batch_with_progress(
-    note_ids: List[int], 
+    note_ids: List[int],
     embedding_model_instance: SentenceTransformer,
     embedding_model_name: str,
     notes_collection
 ):
-    """
-    Generates and stores embeddings for a batch of notes with a visual progress bar.
-    """
     if not embedding_model_instance:
         st.error("Embedding model not available. Cannot process notes.")
         return 0
@@ -78,8 +68,7 @@ def generate_note_embeddings_batch_with_progress(
             with open(content_path, 'r', encoding='utf-8') as f:
                 full_content_with_header = f.read()
             
-            # --- FIX: Isolate the actual note content from the metadata header ---
-            # The document that gets embedded should ONLY be the semantic content.
+            # --- FIX 1: Isolate the actual note content from the metadata header ---
             clean_content = full_content_with_header.split("-" * 50, 1)[-1].strip()
             
             if not clean_content:
@@ -87,17 +76,16 @@ def generate_note_embeddings_batch_with_progress(
                 continue
 
             embedding = embedding_model_instance.encode(clean_content, normalize_embeddings=True).tolist()
-            chroma_id = f"note_{note_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            
+            # --- FIX 2: Use a stable, predictable ID based only on the note_id ---
+            chroma_id = f"note_{note_id}"
             
             notes_collection.add(
                 ids=[chroma_id],
                 embeddings=[embedding],
-                # Store the clean content for relevance matching
                 documents=[clean_content],
-                metadatas=[{
-                    "note_id": note_id, "title": title, "note_type": note_type, 
-                    "tags": tags, "links": links, "content_type": "note"
-                }]
+                metadatas=[{"note_id": note_id, "title": title, "note_type": note_type, 
+                            "tags": tags, "links": links, "content_type": "note"}]
             )
             
             conn.execute("UPDATE notes SET has_embedding = TRUE, embedding_model = ? WHERE id = ?", (embedding_model_name, note_id))
@@ -116,9 +104,6 @@ def generate_note_embeddings_batch_with_progress(
     return successful_count
 
 def process_embedding_queue(embedding_model_instance: SentenceTransformer, embedding_model_name: str, notes_collection):
-    """
-    Checks for and processes any pending notes that need embeddings.
-    """
     db_path = Path("notes") / "metadata" / "notes_database.db"
     if not db_path.exists():
         return 0
