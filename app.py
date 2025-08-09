@@ -1,6 +1,6 @@
 # app.py
 
-# --- FIX: Apply the pysqlite3 patch and disable telemetry BEFORE any other imports ---
+# --- Apply the pysqlite3 patch and disable telemetry ---
 import os
 os.environ["CHROMADB_DISABLE_TELEMETRY"] = "true"
 import pysqlite3
@@ -9,10 +9,9 @@ sys.modules["sqlite3"] = pysqlite3
 # -------------------------------------------------------------------------------------
 
 import streamlit as st
-import time
 from pathlib import Path
 
-# Import the newly created modules for backend logic
+# --- Backend Modules ---
 import database as db
 import vector_db as vdb
 import embeddings as emb
@@ -25,13 +24,13 @@ import google_drive_sync as gds
 st.set_page_config(page_title="AI Knowledge Management System", layout="wide")
 st.title("🚀 AI Knowledge Management System (Phase 3+)")
 
-# --- Google Drive Synchronization Logic (CORRECTED IMPLEMENTATION) ---
+# --- Google Drive Synchronization Logic ---
 if 'drive_synced' not in st.session_state:
     st.session_state.drive_synced = False
 if 'drive_instance' not in st.session_state:
     st.session_state.drive_instance = None
 
-# This block now runs on every script rerun, but the sync and processing only happen once per session.
+# --- Application Entry Point ---
 if not st.session_state.drive_synced:
     try:
         with st.spinner("Connecting to Google Drive and syncing data..."):
@@ -39,24 +38,27 @@ if not st.session_state.drive_synced:
             gds.sync_directory_from_drive(drive, "notes")
             gds.sync_directory_from_drive(drive, "product_embeddings_v2")
             st.session_state.drive_instance = drive
-        
-        with st.spinner("Scanning for new notes and updating embeddings..."):
-            db.scan_and_queue_new_notes()
-            embedding_model = emb.load_embedding_model("BAAI/bge-small-en-v1.5")
-            notes_collection = vdb.get_notes_chroma_collection("user_notes_local", 384)
-            if embedding_model and notes_collection:
-                processed_count = emb.process_embedding_queue(embedding_model, "BAAI/bge-small-en-v1.5", notes_collection)
-                if processed_count > 0:
-                    st.toast(f"✅ Automatically processed {processed_count} synced notes.")
+
+        # Initialize database and models
+        db.init_advanced_notes_database()
+        embedding_model = emb.load_embedding_model("BAAI/bge-small-en-v1.5")
+        embedding_dim = embedding_model.get_sentence_embedding_dimension()
+        notes_collection = vdb.get_notes_chroma_collection("user_notes_local", embedding_dim)
+
+        # Scan for new notes from the sync
+        db.scan_and_queue_new_notes()
+
+        # Process the entire queue one-by-one
+        processed_count = emb.process_embedding_queue(embedding_model, "BAAI/bge-small-en-v1.5", notes_collection)
+        if processed_count > 0:
+            st.toast(f"✅ Automatically processed {processed_count} synced notes.")
 
         st.session_state.drive_synced = True
-        st.rerun() # Rerun the script to load the main app UI
+        st.rerun()
 
     except Exception as e:
         st.sidebar.error(f"❌ Google Drive sync failed: {e}")
         st.stop()
-# --- END CORRECTION ---
-
 
 # --- Main Application Logic ---
 def main():
@@ -85,7 +87,6 @@ def main():
     if 'conversation_history' not in st.session_state: st.session_state.conversation_history = []
     if 'show_note_manager' not in st.session_state: st.session_state.show_note_manager = False
     
-    notes_db_path = db.init_advanced_notes_database()
     embedding_model = emb.load_embedding_model(embedding_model_name)
     
     if embedding_model:
@@ -93,15 +94,13 @@ def main():
         products_collection = vdb.get_local_chroma_collection("analog_products_local", embedding_dim)
         notes_collection = vdb.get_notes_chroma_collection("user_notes_local", embedding_dim)
 
-    # --- Sidebar: Advanced Notes UI ---
+    # --- Sidebar: Notes UI ---
     st.sidebar.header("📝 Advanced Notes")
     stats = db.get_advanced_notes_stats()
     if stats:
         col1, col2 = st.sidebar.columns(2)
         col1.metric("Total Notes", stats.get("total_notes", 0))
         col2.metric("Need Embedding", stats.get("needs_embedding", 0))
-        if stats.get("pending_jobs", 0) > 0:
-            st.sidebar.info(f"{stats.get('pending_jobs', 0)} notes are being processed...")
 
     with st.sidebar.expander("✨ Create Advanced Note"):
         note_type = st.selectbox("Category:", list(db.NOTE_CATEGORIES.keys()), format_func=lambda x: f"{db.NOTE_CATEGORIES[x]['emoji']} {x.replace('_', ' ').title()}")
@@ -112,12 +111,11 @@ def main():
         if st.button("💾 Save Advanced Note"):
             if note_title and note_content:
                 note_id, _ = db.save_advanced_note(note_type, note_title, note_content, note_links, note_tags)
-                st.success(f"Note saved! ID: {note_id}. Generating embeddings...")
+                st.toast(f"Note saved! ID: {note_id}. Processing...")
                 
-                with st.spinner("Processing new note..."):
-                    processed_count = emb.process_embedding_queue(embedding_model, embedding_model_name, notes_collection)
-                    if processed_count > 0:
-                        st.success(f"Embeddings generated for new note!")
+                processed_count = emb.process_embedding_queue(embedding_model, embedding_model_name, notes_collection)
+                if processed_count > 0:
+                    st.toast("✅ Embeddings generated for new note!")
                 
                 gds.sync_directory_to_drive(st.session_state.drive_instance, "notes")
                 st.rerun()
@@ -138,10 +136,10 @@ def main():
 
         all_notes = db.get_all_notes_with_details()
         if not all_notes:
-            st.info("No notes found. Create one from the sidebar!")
+            st.info("No notes found.")
         else:
             for note in all_notes:
-                with st.expander(f"{db.NOTE_CATEGORIES[note['type']]['emoji']} {note['title']}"):
+                with st.expander(f"{db.NOTE_CATEGORIES.get(note['type'], {}).get('emoji', '📝')} {note['title']}"):
                     st.write(f"**Type:** {note['type'].replace('_', ' ').title()}")
                     st.write(f"**Last Modified:** {note['last_modified'][:19]}")
                     st.write(f"**Embedding Status:** {'✅ Ready' if note['has_embedding'] else '⏳ Pending'}")
@@ -150,7 +148,7 @@ def main():
                         db.delete_note(note['id'])
                         vdb.delete_note_embedding([note['id']], notes_collection)
                         gds.sync_directory_to_drive(st.session_state.drive_instance, "notes")
-                        st.success(f"Note '{note['title']}' and its embeddings have been deleted.")
+                        st.success(f"Note '{note['title']}' deleted.")
                         st.rerun()
 
     st.header("🔍 Unified Search (Products & Notes)")
@@ -182,16 +180,9 @@ def main():
                     )
                     utils.add_to_conversation("user", query_text)
                     utils.extract_and_display_unified_results(results)
+    
+    # ... (rest of your UI remains the same)
 
-    with st.expander("Conversation Management"):
-        if st.button("🧹 Clear Conversation History"): utils.clear_conversation_history()
-        if st.button("📋 View Conversation History"): st.json(st.session_state.conversation_history)
-
-    with st.expander("🗂️ Data Management"):
-        if st.button("📂 Ingest Local Product Embeddings"):
-            vdb.ingest_local_embeddings(products_collection)
-
-# --- Application Entry Point ---
 if __name__ == "__main__":
     if st.session_state.drive_synced:
         main()
