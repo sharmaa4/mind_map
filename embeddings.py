@@ -14,12 +14,6 @@ from typing import List, Optional
 def load_embedding_model(model_name: str = "BAAI/bge-small-en-v1.5") -> Optional[SentenceTransformer]:
     """
     Loads a local Sentence Transformer model and caches it.
-
-    Args:
-        model_name (str): The name of the model to load from Hugging Face.
-
-    Returns:
-        Optional[SentenceTransformer]: The loaded model instance, or None if an error occurs.
     """
     try:
         with st.spinner(f"Loading embedding model: {model_name}..."):
@@ -28,19 +22,11 @@ def load_embedding_model(model_name: str = "BAAI/bge-small-en-v1.5") -> Optional
         return model
     except Exception as e:
         st.error(f"❌ Error loading embedding model '{model_name}': {e}")
-        st.write("Please ensure 'sentence-transformers' is installed: `pip install sentence-transformers`")
         return None
 
 def get_query_embedding_local(query_text: str, model: SentenceTransformer) -> Optional[list]:
     """
     Generates a vector embedding for a given query text using a local model.
-
-    Args:
-        query_text (str): The text to be embedded.
-        model (SentenceTransformer): The loaded sentence transformer model.
-
-    Returns:
-        Optional[list]: The generated embedding as a list of floats, or None on error.
     """
     if model is None:
         st.error("❌ Embedding model is not available for query processing.")
@@ -57,19 +43,12 @@ def get_query_embedding_local(query_text: str, model: SentenceTransformer) -> Op
 
 def generate_note_embeddings_batch_with_progress(
     note_ids: List[int], 
-    embedding_model_instance: SentenceTransformer, 
+    embedding_model_instance: SentenceTransformer,
+    embedding_model_name: str, # <-- FIX: Added model name parameter
     notes_collection
 ):
     """
     Generates and stores embeddings for a batch of notes with a visual progress bar.
-
-    Args:
-        note_ids (List[int]): A list of note IDs to process.
-        embedding_model_instance (SentenceTransformer): The loaded embedding model.
-        notes_collection (chromadb.Collection): The ChromaDB collection to store note embeddings.
-
-    Returns:
-        int: The number of successfully processed notes.
     """
     if not embedding_model_instance:
         st.error("Embedding model not available. Cannot process notes.")
@@ -109,7 +88,8 @@ def generate_note_embeddings_batch_with_progress(
                 metadatas=[{"note_id": note_id, "title": title, "note_type": note_type, "tags": tags, "links": links, "content_type": "note"}]
             )
             
-            conn.execute("UPDATE notes SET has_embedding = TRUE, embedding_model = ? WHERE id = ?", (embedding_model_instance.get_name(), note_id))
+            # FIX: Use the embedding_model_name string instead of calling a non-existent method
+            conn.execute("UPDATE notes SET has_embedding = TRUE, embedding_model = ? WHERE id = ?", (embedding_model_name, note_id))
             conn.execute("UPDATE embedding_jobs SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE note_id = ?", (note_id,))
             successful_count += 1
             
@@ -124,16 +104,9 @@ def generate_note_embeddings_batch_with_progress(
     status_text.success(f"Successfully processed {successful_count}/{len(note_ids)} notes.")
     return successful_count
 
-def process_embedding_queue(embedding_model_instance, notes_collection):
+def process_embedding_queue(embedding_model_instance: SentenceTransformer, embedding_model_name: str, notes_collection):
     """
     Checks for and processes any pending notes that need embeddings.
-    
-    Args:
-        embedding_model_instance (SentenceTransformer): The model to use for embedding.
-        notes_collection (chromadb.Collection): The collection where embeddings are stored.
-
-    Returns:
-        int: The number of notes for which embeddings were successfully generated.
     """
     db_path = Path("notes") / "metadata" / "notes_database.db"
     if not db_path.exists():
@@ -149,4 +122,5 @@ def process_embedding_queue(embedding_model_instance, notes_collection):
         return 0
         
     note_ids_to_process = [job[0] for job in pending_jobs]
-    return generate_note_embeddings_batch_with_progress(note_ids_to_process, embedding_model_instance, notes_collection)
+    # FIX: Pass the model name to the processing function
+    return generate_note_embeddings_batch_with_progress(note_ids_to_process, embedding_model_instance, embedding_model_name, notes_collection)
