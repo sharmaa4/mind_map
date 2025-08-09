@@ -126,6 +126,50 @@ def init_advanced_notes_database():
     
     return str(db_path)
 
+def scan_and_queue_new_notes():
+    """
+    Scans the notes directories for text files that are not yet in the database,
+    and adds them to the database and the embedding queue.
+    """
+    print("Scanning for new notes from Google Drive sync...")
+    db_path = Path("notes") / "metadata" / "notes_database.db"
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+
+    all_note_files = []
+    for category in NOTE_CATEGORIES.keys():
+        category_path = Path("notes") / category
+        all_note_files.extend(list(category_path.glob("*.txt")))
+
+    for note_file in all_note_files:
+        with open(note_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        file_hash = hashlib.md5(content.encode()).hexdigest()
+
+        # Check if the file hash already exists in the database
+        cursor.execute("SELECT id FROM notes WHERE file_hash = ?", (file_hash,))
+        existing_note = cursor.fetchone()
+
+        if not existing_note:
+            # This is a new note, so we need to add it to the database
+            print(f"New note found: {note_file.name}. Adding to database and embedding queue.")
+
+            # Parse the note to extract metadata (this is a simplified parser)
+            lines = content.splitlines()
+            title = lines[0].replace("Title: ", "").strip() if lines else "Untitled"
+            note_type = lines[1].replace("Category: ", "").strip() if len(lines) > 1 else "personal"
+            tags = lines[2].replace("Tags: ", "").strip() if len(lines) > 2 else ""
+            links = lines[4].replace("Links: ", "").strip() if len(lines) > 4 else ""
+            note_content = content.split("--------------------------------------------------\n\n")[-1]
+
+
+            # Save the new note to the database
+            save_advanced_note(note_type, title, note_content, links, tags)
+
+    conn.close()
+
+
 def save_advanced_note(note_type, title, content, links="", tags="", audio_file=None):
     """Save a note with enhanced metadata and queue embedding generation."""
     if note_type not in NOTE_CATEGORIES:
