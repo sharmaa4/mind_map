@@ -87,17 +87,17 @@ def create_streaming_puter_component(prompt: str, model: str = "gpt-4o-mini", st
                             }}
                         }}
                         const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                        { # FIX: Escaped the curly braces for JavaScript variables # }
+                        { # FIX 1: Escaped the curly braces for JavaScript variables # }
                         statsDiv.innerText = `✅ Stream complete in: ${{totalTime}}s`;
                     }} else {{
                         const response = await puter.ai.chat(prompt, {{ model: modelName, stream: false }});
                         resultDiv.innerText = response;
                         const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                        { # FIX: Escaped the curly braces for JavaScript variables # }
+                        { # FIX 2: Escaped the curly braces for JavaScript variables # }
                         statsDiv.innerText = `✅ Completed in: ${{totalTime}}s`;
                     }}
                 }} catch (error) {{
-                    { # FIX: Escaped the curly braces for JavaScript variables # }
+                    { # FIX 3: Escaped the curly braces for JavaScript variables # }
                     resultDiv.innerText = `❌ An error occurred: ${{error.message}}`;
                     console.error("Puter.js error:", error);
                 }}
