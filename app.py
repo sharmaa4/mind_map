@@ -45,7 +45,7 @@ def initial_sync():
 
 # --- Main Application Logic ---
 def main():
-    """Main function to run the Streamlit App."""
+    """Main function to run the Streamlit App. This should only run AFTER sync is confirmed."""
     
     # --- Sidebar UI ---
     st.sidebar.success("🎉 Phase 3+: Complete Knowledge Management!")
@@ -129,6 +129,7 @@ def main():
                     st.write(f"**Embedding Status:** {'✅ Ready' if note['has_embedding'] else '⏳ Pending'}")
 
                     if st.button("🗑️ Delete Note", key=f"delete_{note['id']}"):
+                        # --- FIX: Correct deletion order and logic ---
                         db.delete_note(note['id'])
                         vdb.delete_note_embedding([note['id']], notes_collection)
                         gds.sync_directory_to_drive(st.session_state.drive_instance, "notes")
