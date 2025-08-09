@@ -44,7 +44,7 @@ def get_query_embedding_local(query_text: str, model: SentenceTransformer) -> Op
 def generate_note_embeddings_batch_with_progress(
     note_ids: List[int], 
     embedding_model_instance: SentenceTransformer,
-    embedding_model_name: str, # <-- FIX: Added model name parameter
+    embedding_model_name: str,
     notes_collection
 ):
     """
@@ -76,19 +76,30 @@ def generate_note_embeddings_batch_with_progress(
             title, content_path, note_type, tags, links = note_info
             
             with open(content_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+                full_content_with_header = f.read()
             
-            embedding = embedding_model_instance.encode(content, normalize_embeddings=True).tolist()
+            # --- FIX: Isolate the actual note content from the metadata header ---
+            # The document that gets embedded should ONLY be the semantic content.
+            clean_content = full_content_with_header.split("-" * 50, 1)[-1].strip()
+            
+            if not clean_content:
+                status_text.warning(f"Note ID {note_id} has no content after header. Skipping.")
+                continue
+
+            embedding = embedding_model_instance.encode(clean_content, normalize_embeddings=True).tolist()
             chroma_id = f"note_{note_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             
             notes_collection.add(
                 ids=[chroma_id],
                 embeddings=[embedding],
-                documents=[content],
-                metadatas=[{"note_id": note_id, "title": title, "note_type": note_type, "tags": tags, "links": links, "content_type": "note"}]
+                # Store the clean content for relevance matching
+                documents=[clean_content],
+                metadatas=[{
+                    "note_id": note_id, "title": title, "note_type": note_type, 
+                    "tags": tags, "links": links, "content_type": "note"
+                }]
             )
             
-            # FIX: Use the embedding_model_name string instead of calling a non-existent method
             conn.execute("UPDATE notes SET has_embedding = TRUE, embedding_model = ? WHERE id = ?", (embedding_model_name, note_id))
             conn.execute("UPDATE embedding_jobs SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE note_id = ?", (note_id,))
             successful_count += 1
@@ -122,5 +133,4 @@ def process_embedding_queue(embedding_model_instance: SentenceTransformer, embed
         return 0
         
     note_ids_to_process = [job[0] for job in pending_jobs]
-    # FIX: Pass the model name to the processing function
     return generate_note_embeddings_batch_with_progress(note_ids_to_process, embedding_model_instance, embedding_model_name, notes_collection)
