@@ -25,27 +25,42 @@ import google_drive_sync as gds
 st.set_page_config(page_title="AI Knowledge Management System", layout="wide")
 st.title("🚀 AI Knowledge Management System (Phase 3+)")
 
-# --- Google Drive Synchronization Logic ---
+# --- Google Drive Synchronization Logic (CORRECTED IMPLEMENTATION) ---
 if 'drive_synced' not in st.session_state:
     st.session_state.drive_synced = False
 if 'drive_instance' not in st.session_state:
     st.session_state.drive_instance = None
 
-@st.cache_resource(show_spinner="Connecting to Google Drive and syncing data...")
-def initial_sync():
-    """Authenticates with Google Drive and performs the initial data sync."""
+# This block now runs on every script rerun, but the sync and processing only happen once per session.
+if not st.session_state.drive_synced:
     try:
-        drive = gds.authenticate_gdrive()
-        gds.sync_directory_from_drive(drive, "notes")
-        gds.sync_directory_from_drive(drive, "product_embeddings_v2")
-        return drive
+        with st.spinner("Connecting to Google Drive and syncing data..."):
+            drive = gds.authenticate_gdrive()
+            gds.sync_directory_from_drive(drive, "notes")
+            gds.sync_directory_from_drive(drive, "product_embeddings_v2")
+            st.session_state.drive_instance = drive
+        
+        with st.spinner("Scanning for new notes and updating embeddings..."):
+            db.scan_and_queue_new_notes()
+            embedding_model = emb.load_embedding_model("BAAI/bge-small-en-v1.5")
+            notes_collection = vdb.get_notes_chroma_collection("user_notes_local", 384)
+            if embedding_model and notes_collection:
+                processed_count = emb.process_embedding_queue(embedding_model, "BAAI/bge-small-en-v1.5", notes_collection)
+                if processed_count > 0:
+                    st.toast(f"✅ Automatically processed {processed_count} synced notes.")
+
+        st.session_state.drive_synced = True
+        st.rerun() # Rerun the script to load the main app UI
+
     except Exception as e:
-        st.error(f"Fatal Error: Could not sync with Google Drive. Details: {e}")
-        return None
+        st.sidebar.error(f"❌ Google Drive sync failed: {e}")
+        st.stop()
+# --- END CORRECTION ---
+
 
 # --- Main Application Logic ---
 def main():
-    """Main function to run the Streamlit App. This should only run AFTER sync is confirmed."""
+    """Main function to run the Streamlit App."""
     
     # --- Sidebar UI ---
     st.sidebar.success("🎉 Phase 3+: Complete Knowledge Management!")
@@ -66,7 +81,7 @@ def main():
     enable_unified_search = st.sidebar.checkbox("🔗 Unified Search (Products + Notes)", value=True)
     note_context_weight = st.sidebar.slider("📝 Note Context Weight", 0.0, 1.0, 0.3)
 
-    # --- Initialization after Sync ---
+    # --- Initialization ---
     if 'conversation_history' not in st.session_state: st.session_state.conversation_history = []
     if 'show_note_manager' not in st.session_state: st.session_state.show_note_manager = False
     
@@ -177,25 +192,6 @@ def main():
             vdb.ingest_local_embeddings(products_collection)
 
 # --- Application Entry Point ---
-if not st.session_state.drive_synced:
-    drive_instance = initial_sync()
-    if drive_instance:
-        st.session_state.drive_synced = True
-        st.session_state.drive_instance = drive_instance
-
-        with st.spinner("Scanning for new notes and updating embeddings..."):
-            db.scan_and_queue_new_notes()
-            embedding_model = emb.load_embedding_model("BAAI/bge-small-en-v1.5")
-            notes_collection = vdb.get_notes_chroma_collection("user_notes_local", 384)
-            if embedding_model and notes_collection:
-                processed_count = emb.process_embedding_queue(embedding_model, "BAAI/bge-small-en-v1.5", notes_collection)
-                if processed_count > 0:
-                    st.success(f"Automatically processed {processed_count} synced notes.")
-        
-        st.cache_resource.clear()
-        st.rerun()
-    else:
-        st.sidebar.error("❌ Google Drive sync failed. App cannot continue.")
-        st.stop()
-else:
-    main()
+if __name__ == "__main__":
+    if st.session_state.drive_synced:
+        main()
