@@ -24,54 +24,65 @@ import google_drive_sync as gds
 st.set_page_config(page_title="AI Knowledge Management System", layout="wide")
 st.title("🚀 AI Knowledge Management System (Phase 3+)")
 
-# --- Google Drive Synchronization Logic ---
+# --- State Initialization ---
 if 'drive_synced' not in st.session_state:
     st.session_state.drive_synced = False
 if 'drive_instance' not in st.session_state:
     st.session_state.drive_instance = None
+# FIX: Store a single source of truth for the embedding model name
+if 'embedding_model_name' not in st.session_state:
+    st.session_state.embedding_model_name = "BAAI/bge-small-en-v1.5"
 
-# --- Application Entry Point ---
+# --- Application Entry Point & Initialization ---
 if not st.session_state.drive_synced:
     try:
+        # This block now runs the entire setup pipeline sequentially.
         with st.spinner("Connecting to Google Drive and syncing data..."):
             drive = gds.authenticate_gdrive()
             gds.sync_directory_from_drive(drive, "notes")
             gds.sync_directory_from_drive(drive, "product_embeddings_v2")
             st.session_state.drive_instance = drive
 
-        # Initialize database and models
-        db.init_advanced_notes_database()
+        with st.spinner("Initializing database and loading AI models..."):
+            db.init_advanced_notes_database()
+            embedding_model = emb.load_embedding_model(st.session_state.embedding_model_name)
+            
+            if embedding_model:
+                embedding_dim = embedding_model.get_sentence_embedding_dimension()
+                
+                # FIX: Namespace collection names based on the model to ensure consistency
+                model_name_safe = st.session_state.embedding_model_name.replace('/', '__')
+                notes_collection_name = f"user_notes_local__{model_name_safe}"
+                products_collection_name = f"analog_products_local__{model_name_safe}"
 
-        # FIX: Load the embedding model *before* processing the queue
-        embedding_model = emb.load_embedding_model("BAAI/bge-small-en-v1.5")
-        
-        if embedding_model:
-            embedding_dim = embedding_model.get_sentence_embedding_dimension()
-            notes_collection = vdb.get_notes_chroma_collection("user_notes_local", embedding_dim)
+                products_collection = vdb.get_local_chroma_collection(products_collection_name, embedding_dim)
+                notes_collection = vdb.get_notes_chroma_collection(notes_collection_name, embedding_dim)
+                
+                # Ingest product data
+                vdb.ingest_local_embeddings(products_collection)
 
-            # Scan for new notes from the sync
-            db.scan_and_queue_new_notes()
+                # Scan and process notes
+                db.scan_and_queue_new_notes()
+                processed_count = emb.process_embedding_queue(embedding_model, st.session_state.embedding_model_name, notes_collection)
+                
+                if processed_count > 0:
+                    st.toast(f"✅ Automatically processed {processed_count} synced notes.")
+            else:
+                raise Exception("Failed to load the embedding model.")
 
-            # Process the entire queue one-by-one
-            processed_count = emb.process_embedding_queue(embedding_model, "BAAI/bge-small-en-v1.5", notes_collection)
-            if processed_count > 0:
-                st.toast(f"✅ Automatically processed {processed_count} synced notes.")
-        else:
-            st.error("Failed to load the embedding model. Embeddings cannot be generated.")
-
-
+        # FIX: Only set the flag after the entire pipeline is complete
         st.session_state.drive_synced = True
         st.rerun()
 
     except Exception as e:
-        st.sidebar.error(f"❌ Google Drive sync failed: {e}")
+        st.sidebar.error(f"❌ Initialization failed: {e}")
         st.stop()
+
 
 # --- Main Application Logic ---
 def main():
     """Main function to run the Streamlit App."""
     
-    # --- Sidebar UI ---
     st.sidebar.success("🎉 Phase 3+: Complete Knowledge Management!")
     try:
         st.sidebar.image("logo.png", width=200)
@@ -81,7 +92,15 @@ def main():
     st.sidebar.header("🤖 AI Model Selection")
     selected_model = st.sidebar.selectbox("Choose AI Model:", ["gpt-4o-mini", "gpt-4o"], index=0)
     st.sidebar.header("📊 Embedding Model")
-    embedding_model_name = st.sidebar.selectbox("Choose Embedding Model:", ["BAAI/bge-small-en-v1.5", "all-MiniLM-L6-v2"], index=0)
+    
+    # FIX: The selection now updates the session state source of truth
+    embedding_model_name = st.sidebar.selectbox(
+        "Choose Embedding Model:", 
+        ["BAAI/bge-small-en-v1.5", "all-MiniLM-L6-v2"], 
+        index=0,
+        key="embedding_model_name" # Link to session state
+    )
+    
     st.sidebar.header("⚡ Enhanced Features")
     enable_streaming = st.sidebar.checkbox("🔄 Enable Streaming Output", value=True)
     enable_context = st.sidebar.checkbox("🧠 Enable Context Awareness", value=True)
@@ -98,8 +117,13 @@ def main():
     
     if embedding_model:
         embedding_dim = embedding_model.get_sentence_embedding_dimension()
-        products_collection = vdb.get_local_chroma_collection("analog_products_local", embedding_dim)
-        notes_collection = vdb.get_notes_chroma_collection("user_notes_local", embedding_dim)
+        # FIX: Use the same namespacing logic as the startup process
+        model_name_safe = embedding_model_name.replace('/', '__')
+        products_collection_name = f"analog_products_local__{model_name_safe}"
+        notes_collection_name = f"user_notes_local__{model_name_safe}"
+        
+        products_collection = vdb.get_local_chroma_collection(products_collection_name, embedding_dim)
+        notes_collection = vdb.get_notes_chroma_collection(notes_collection_name, embedding_dim)
 
     # --- Sidebar: Notes UI ---
     st.sidebar.header("📝 Advanced Notes")
@@ -187,8 +211,6 @@ def main():
                     )
                     utils.add_to_conversation("user", query_text)
                     utils.extract_and_display_unified_results(results)
-    
-    # ... (rest of your UI remains the same)
 
 if __name__ == "__main__":
     if st.session_state.drive_synced:

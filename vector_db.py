@@ -18,9 +18,17 @@ def get_chroma_client(persist_directory: str = "./db_local/") -> chromadb.Persis
 
 @st.cache_resource(show_spinner=False)
 def get_local_chroma_collection(collection_name: str, embedding_dimension: int) -> Optional[chromadb.Collection]:
+    """
+    Gets or creates a ChromaDB collection with a specific name for products.
+    The collection name is expected to be model-specific.
+    """
     try:
         client = get_chroma_client()
-        collection = client.get_or_create_collection(name=f"{collection_name}_{embedding_dimension}d", metadata={"embedding_dimension": embedding_dimension})
+        # FIX: The collection name is now passed in directly, ensuring model-specific naming.
+        collection = client.get_or_create_collection(
+            name=collection_name, 
+            metadata={"embedding_dimension": embedding_dimension}
+        )
         return collection
     except Exception as e:
         st.error(f"Error getting Chroma product collection: {e}")
@@ -28,9 +36,17 @@ def get_local_chroma_collection(collection_name: str, embedding_dimension: int) 
 
 @st.cache_resource(show_spinner=False)
 def get_notes_chroma_collection(collection_name: str, embedding_dimension: int) -> Optional[chromadb.Collection]:
+    """
+    Gets or creates a ChromaDB collection with a specific name for notes.
+    The collection name is expected to be model-specific.
+    """
     try:
         client = get_chroma_client()
-        collection = client.get_or_create_collection(name=f"{collection_name}_{embedding_dimension}d", metadata={"embedding_dimension": embedding_dimension})
+        # FIX: The collection name is now passed in directly, ensuring model-specific naming.
+        collection = client.get_or_create_collection(
+            name=collection_name, 
+            metadata={"embedding_dimension": embedding_dimension}
+        )
         return collection
     except Exception as e:
         st.error(f"Error getting notes collection: {e}")
