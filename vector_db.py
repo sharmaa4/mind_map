@@ -20,11 +20,10 @@ def get_chroma_client(persist_directory: str = "./db_local/") -> chromadb.Persis
 def get_local_chroma_collection(collection_name: str, embedding_dimension: int) -> Optional[chromadb.Collection]:
     """
     Gets or creates a ChromaDB collection with a specific name for products.
-    The collection name is expected to be model-specific.
+    The collection name is now expected to be model-specific and passed directly from app.py.
     """
     try:
         client = get_chroma_client()
-        # FIX: The collection name is now passed in directly, ensuring model-specific naming.
         collection = client.get_or_create_collection(
             name=collection_name, 
             metadata={"embedding_dimension": embedding_dimension}
@@ -38,11 +37,10 @@ def get_local_chroma_collection(collection_name: str, embedding_dimension: int) 
 def get_notes_chroma_collection(collection_name: str, embedding_dimension: int) -> Optional[chromadb.Collection]:
     """
     Gets or creates a ChromaDB collection with a specific name for notes.
-    The collection name is expected to be model-specific.
+    The collection name is now expected to be model-specific and passed directly from app.py.
     """
     try:
         client = get_chroma_client()
-        # FIX: The collection name is now passed in directly, ensuring model-specific naming.
         collection = client.get_or_create_collection(
             name=collection_name, 
             metadata={"embedding_dimension": embedding_dimension}
@@ -52,7 +50,7 @@ def get_notes_chroma_collection(collection_name: str, embedding_dimension: int) 
         st.error(f"Error getting notes collection: {e}")
         return None
 
-# --- NEW FUNCTION: Deletion Logic ---
+# --- Deletion Logic ---
 def delete_note_embedding(note_ids: List[int], notes_collection: chromadb.Collection):
     """
     Deletes embeddings for the given note IDs from the ChromaDB collection.
@@ -67,8 +65,7 @@ def delete_note_embedding(note_ids: List[int], notes_collection: chromadb.Collec
     except Exception as e:
         st.error(f"Error deleting embeddings from vector database: {e}")
 
-
-# --- Data Ingestion Logic (remains the same) ---
+# --- Data Ingestion Logic ---
 def ingest_local_embeddings(collection: chromadb.Collection, embeddings_folder: str = "product_embeddings_v2"):
     if not os.path.exists(embeddings_folder):
         st.warning(f"Embeddings folder '{embeddings_folder}' not found.")
@@ -83,7 +80,7 @@ def ingest_local_embeddings(collection: chromadb.Collection, embeddings_folder: 
     st.write(f"📁 Found {len(embedding_files)} local embedding files to process.")
     
     total_docs_ingested = 0
-    with st.spinner("Ingesting local embeddings into ChromaDB..."):
+    with st.spinner("Ingesting local product embeddings into ChromaDB..."):
         for file_path in embedding_files:
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
@@ -112,6 +109,6 @@ def ingest_local_embeddings(collection: chromadb.Collection, embeddings_folder: 
                 st.error(f"Error processing file {file_path}: {e}")
 
     if total_docs_ingested > 0:
-        st.success(f"✅ Ingested {total_docs_ingested} documents from local embeddings!")
+        st.success(f"✅ Ingested {total_docs_ingested} documents from local product embeddings!")
     else:
-        st.info("No new documents were ingested.")
+        st.info("No new product documents were ingested.")

@@ -9,7 +9,6 @@ sys.modules["sqlite3"] = pysqlite3
 # -------------------------------------------------------------------------------------
 
 import streamlit as st
-from pathlib import Path
 
 # --- Backend Modules ---
 import database as db
@@ -29,53 +28,52 @@ if 'drive_synced' not in st.session_state:
     st.session_state.drive_synced = False
 if 'drive_instance' not in st.session_state:
     st.session_state.drive_instance = None
-# FIX: Store a single source of truth for the embedding model name
+# FIX: Establish a single source of truth for the embedding model name.
 if 'embedding_model_name' not in st.session_state:
     st.session_state.embedding_model_name = "BAAI/bge-small-en-v1.5"
 
 # --- Application Entry Point & Initialization ---
+# FIX: This entire block runs ONCE at startup to ensure a consistent state.
 if not st.session_state.drive_synced:
     try:
-        # This block now runs the entire setup pipeline sequentially.
-        with st.spinner("Connecting to Google Drive and syncing data..."):
+        with st.spinner("Step 1/5: Syncing with Google Drive..."):
             drive = gds.authenticate_gdrive()
             gds.sync_directory_from_drive(drive, "notes")
             gds.sync_directory_from_drive(drive, "product_embeddings_v2")
             st.session_state.drive_instance = drive
 
-        with st.spinner("Initializing database and loading AI models..."):
+        with st.spinner("Step 2/5: Initializing database and loading AI models..."):
             db.init_advanced_notes_database()
             embedding_model = emb.load_embedding_model(st.session_state.embedding_model_name)
+            if not embedding_model:
+                raise Exception("Fatal: Could not load the embedding model.")
             
-            if embedding_model:
-                embedding_dim = embedding_model.get_sentence_embedding_dimension()
-                
-                # FIX: Namespace collection names based on the model to ensure consistency
-                model_name_safe = st.session_state.embedding_model_name.replace('/', '__')
-                notes_collection_name = f"user_notes_local__{model_name_safe}"
-                products_collection_name = f"analog_products_local__{model_name_safe}"
+            embedding_dim = embedding_model.get_sentence_embedding_dimension()
+            
+            # FIX: Namespace collection names based on the model to ensure consistency.
+            model_name_safe = st.session_state.embedding_model_name.replace('/', '__')
+            notes_collection_name = f"user_notes_local__{model_name_safe}"
+            products_collection_name = f"analog_products_local__{model_name_safe}"
 
-                products_collection = vdb.get_local_chroma_collection(products_collection_name, embedding_dim)
-                notes_collection = vdb.get_notes_chroma_collection(notes_collection_name, embedding_dim)
-                
-                # Ingest product data
-                vdb.ingest_local_embeddings(products_collection)
+        with st.spinner("Step 3/5: Setting up vector collections..."):
+            products_collection = vdb.get_local_chroma_collection(products_collection_name, embedding_dim)
+            notes_collection = vdb.get_notes_chroma_collection(notes_collection_name, embedding_dim)
 
-                # Scan and process notes
-                db.scan_and_queue_new_notes()
-                processed_count = emb.process_embedding_queue(embedding_model, st.session_state.embedding_model_name, notes_collection)
-                
-                if processed_count > 0:
-                    st.toast(f"✅ Automatically processed {processed_count} synced notes.")
-            else:
-                raise Exception("Failed to load the embedding model.")
+        with st.spinner("Step 4/5: Ingesting product data..."):
+            vdb.ingest_local_embeddings(products_collection)
 
-        # FIX: Only set the flag after the entire pipeline is complete
+        with st.spinner("Step 5/5: Scanning and processing synced notes..."):
+            db.scan_and_queue_new_notes()
+            processed_count = emb.process_embedding_queue(embedding_model, st.session_state.embedding_model_name, notes_collection)
+            if processed_count > 0:
+                st.toast(f"✅ Automatically processed {processed_count} synced notes.")
+
+        # FIX: Set the flag only after the entire pipeline has successfully completed.
         st.session_state.drive_synced = True
         st.rerun()
 
     except Exception as e:
-        st.sidebar.error(f"❌ Initialization failed: {e}")
+        st.sidebar.error(f"❌ Initialization Failed: {e}")
         st.stop()
 
 
@@ -91,14 +89,13 @@ def main():
 
     st.sidebar.header("🤖 AI Model Selection")
     selected_model = st.sidebar.selectbox("Choose AI Model:", ["gpt-4o-mini", "gpt-4o"], index=0)
-    st.sidebar.header("📊 Embedding Model")
     
-    # FIX: The selection now updates the session state source of truth
+    st.sidebar.header("📊 Embedding Model")
+    # FIX: The selectbox now reads from and writes to the session state key.
     embedding_model_name = st.sidebar.selectbox(
-        "Choose Embedding Model:", 
-        ["BAAI/bge-small-en-v1.5", "all-MiniLM-L6-v2"], 
-        index=0,
-        key="embedding_model_name" # Link to session state
+        "Choose Embedding Model:",
+        ["BAAI/bge-small-en-v1.5", "all-MiniLM-L6-v2"],
+        key="embedding_model_name"
     )
     
     st.sidebar.header("⚡ Enhanced Features")
@@ -117,7 +114,7 @@ def main():
     
     if embedding_model:
         embedding_dim = embedding_model.get_sentence_embedding_dimension()
-        # FIX: Use the same namespacing logic as the startup process
+        # FIX: Use the identical namespacing logic for collections.
         model_name_safe = embedding_model_name.replace('/', '__')
         products_collection_name = f"analog_products_local__{model_name_safe}"
         notes_collection_name = f"user_notes_local__{model_name_safe}"
