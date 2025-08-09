@@ -41,17 +41,24 @@ if not st.session_state.drive_synced:
 
         # Initialize database and models
         db.init_advanced_notes_database()
+
+        # FIX: Load the embedding model *before* processing the queue
         embedding_model = emb.load_embedding_model("BAAI/bge-small-en-v1.5")
-        embedding_dim = embedding_model.get_sentence_embedding_dimension()
-        notes_collection = vdb.get_notes_chroma_collection("user_notes_local", embedding_dim)
+        
+        if embedding_model:
+            embedding_dim = embedding_model.get_sentence_embedding_dimension()
+            notes_collection = vdb.get_notes_chroma_collection("user_notes_local", embedding_dim)
 
-        # Scan for new notes from the sync
-        db.scan_and_queue_new_notes()
+            # Scan for new notes from the sync
+            db.scan_and_queue_new_notes()
 
-        # Process the entire queue one-by-one
-        processed_count = emb.process_embedding_queue(embedding_model, "BAAI/bge-small-en-v1.5", notes_collection)
-        if processed_count > 0:
-            st.toast(f"✅ Automatically processed {processed_count} synced notes.")
+            # Process the entire queue one-by-one
+            processed_count = emb.process_embedding_queue(embedding_model, "BAAI/bge-small-en-v1.5", notes_collection)
+            if processed_count > 0:
+                st.toast(f"✅ Automatically processed {processed_count} synced notes.")
+        else:
+            st.error("Failed to load the embedding model. Embeddings cannot be generated.")
+
 
         st.session_state.drive_synced = True
         st.rerun()
