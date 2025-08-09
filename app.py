@@ -110,7 +110,17 @@ query_text = st.text_input("Enter your search query:", placeholder="Search acros
 if st.button("🚀 Unified Search", type="primary"):
     if query_text and embedding_model:
         with st.spinner("Performing unified search..."):
-            results = search.unified_search(query_text, embedding_model, products_collection, notes_collection, note_context_weight, include_notes=enable_unified_search)
+            # --- MODIFICATION ---
+            # Increase n_results to fetch a larger pool of candidates
+            results = search.unified_search(
+                query_text, 
+                embedding_model, 
+                products_collection, 
+                notes_collection, 
+                note_context_weight, 
+                n_results=20, # Fetch more results to ensure enough notes are available
+                include_notes=enable_unified_search
+            )
             
             if results.get("error"):
                 st.error(results["error"])
@@ -119,14 +129,11 @@ if st.button("🚀 Unified Search", type="primary"):
             else:
                 st.success("Search complete! Generating AI summary...")
                 
-                # --- MODIFICATION ---
-                # Filter results by source and build separate context strings
                 all_products = [r for r in results['combined'] if r['source'] == 'product']
                 all_notes = [r for r in results['combined'] if r['source'] == 'note']
                 
-                # Build context, taking the content of the top 15 most relevant notes
                 product_context = "\n\n".join([p['content'] for p in all_products])
-                note_context = "\n\n".join([n['content'] for n in all_notes[:15]]) # Slice for top 15 notes
+                note_context = "\n\n".join([n['content'] for n in all_notes[:15]]) # Now this slice is meaningful
 
                 ai_services.get_ai_response(
                     user_query=query_text, document_context=product_context, note_context=note_context,
