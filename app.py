@@ -1,5 +1,11 @@
 # app.py
 
+# --- FIX: Apply the pysqlite3 patch BEFORE any other imports ---
+import pysqlite3
+import sys
+sys.modules["sqlite3"] = pysqlite3
+# ----------------------------------------------------------------
+
 import streamlit as st
 import time
 from pathlib import Path
@@ -124,12 +130,10 @@ if st.session_state.show_note_manager:
     else:
         for note in all_notes:
             with st.expander(f"{db.NOTE_CATEGORIES[note['type']]['emoji']} {note['title']}"):
-                # Display note details (as before)
                 st.write(f"**Type:** {note['type'].replace('_', ' ').title()}")
                 st.write(f"**Last Modified:** {note['last_modified'][:19]}")
                 st.write(f"**Embedding Status:** {'✅ Ready' if note['has_embedding'] else '⏳ Pending'}")
 
-                # --- FIX: Integrated deletion logic for both databases ---
                 if st.button("🗑️ Delete Note", key=f"delete_{note['id']}"):
                     db.delete_note(note['id'])
                     vdb.delete_note_embedding([note['id']], notes_collection)
@@ -149,7 +153,7 @@ if st.button("🚀 Unified Search", type="primary"):
                 products_collection, 
                 notes_collection, 
                 note_context_weight, 
-                n_results=20, # Fetch a larger pool of candidates
+                n_results=20,
                 include_notes=enable_unified_search
             )
             
@@ -164,7 +168,7 @@ if st.button("🚀 Unified Search", type="primary"):
                 all_notes = [r for r in results['combined'] if r['source'] == 'note']
                 
                 product_context = "\n\n".join([p['content'] for p in all_products])
-                note_context = "\n\n".join([n['content'] for n in all_notes[:15]]) # Slice for top 15 notes
+                note_context = "\n\n".join([n['content'] for n in all_notes[:15]])
 
                 ai_services.get_ai_response(
                     user_query=query_text, document_context=product_context, note_context=note_context,
