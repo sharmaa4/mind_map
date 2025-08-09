@@ -15,21 +15,10 @@ def build_context_prompt(
 ) -> str:
     """
     Builds a comprehensive prompt for the AI, including conversation history and retrieved context.
-
-    Args:
-        user_query (str): The current query from the user.
-        document_context (str): Context retrieved from product documents.
-        note_context (str): Context retrieved from user notes.
-        conversation_history (List[Dict[str, Any]]): A list of previous user/assistant messages.
-        max_context_messages (int): The number of recent messages to include in the prompt.
-
-    Returns:
-        str: The fully constructed prompt to be sent to the AI model.
     """
     # Start with conversation history if available
     if conversation_history:
         context_messages = ""
-        # Get the most recent messages based on the slider value
         for msg in conversation_history[-max_context_messages:]:
             role_emoji = "👤" if msg["role"] == "user" else "🤖"
             context_messages += f"{role_emoji} {msg['role'].capitalize()}: {msg['content']}\n"
@@ -55,11 +44,6 @@ Current Query: {user_query}"""
 def create_streaming_puter_component(prompt: str, model: str = "gpt-4o-mini", stream: bool = True):
     """
     Creates a Streamlit HTML component to call the Puter.js AI and stream the response.
-
-    Args:
-        prompt (str): The complete prompt for the AI model.
-        model (str): The AI model to use (e.g., "gpt-4o-mini").
-        stream (bool): Whether to stream the response.
     """
     escaped_prompt = json.dumps(prompt)
     unique_id = f"puter-component-{int(time.time() * 1000)}"
@@ -108,15 +92,21 @@ def create_streaming_puter_component(prompt: str, model: str = "gpt-4o-mini", st
                             }}
                         }}
                         const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                        statsDiv.innerText = `✅ Stream complete in: $\{totalTime}s`;
+                        {
+                            # CORRECTED LINE
+                        }
+                        statsDiv.innerText = `✅ Stream complete in: ${{totalTime}}s`;
                     }} else {{
                         const response = await puter.ai.chat(prompt, {{ model: modelName, stream: false }});
                         resultDiv.innerText = response;
                         const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                        statsDiv.innerText = `✅ Completed in: $\{totalTime}s`;
+                        {
+                            # CORRECTED LINE
+                        }
+                        statsDiv.innerText = `✅ Completed in: ${{processingTime}}s`;
                     }}
                 }} catch (error) {{
-                    resultDiv.innerText = `❌ An error occurred: $\{error.message}`;
+                    resultDiv.innerText = `❌ An error occurred: ${{error.message}}`;
                     console.error("Puter.js error:", error);
                 }}
             }}
@@ -139,18 +129,7 @@ def get_ai_response(
 ):
     """
     Orchestrates building the prompt and calling the Puter.js component to get the AI response.
-
-    Args:
-        user_query (str): The user's input query.
-        document_context (str): Context from product documents.
-        note_context (str): Context from personal notes.
-        conversation_history (List[Dict[str, Any]]): Past conversation for context.
-        model (str): The selected AI model.
-        enable_streaming (bool): Flag to enable real-time streaming of the response.
-        enable_context (bool): Flag to include conversation history.
-        max_context_messages (int): The number of messages to include from history.
     """
-    # Only use conversation history if the context feature is enabled
     history_to_use = conversation_history if enable_context else []
     
     full_prompt = build_context_prompt(
@@ -167,5 +146,4 @@ def get_ai_response(
     if note_context:
         st.info("📝 Note Context: Including relevant personal notes in the response.")
 
-    # Call the function to render the streaming component
     create_streaming_puter_component(full_prompt, model, enable_streaming)
