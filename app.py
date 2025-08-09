@@ -18,7 +18,6 @@ st.set_page_config(page_title="AI Knowledge Management System", layout="wide")
 st.title("🚀 AI Knowledge Management System (Phase 3+)")
 
 # --- Google Drive Synchronization ---
-# Initialize session state for sync status
 if 'drive_synced' not in st.session_state:
     st.session_state.drive_synced = False
 if 'drive_instance' not in st.session_state:
@@ -54,35 +53,22 @@ try:
 except Exception:
     pass
 
-# AI Model Selection
 st.sidebar.header("🤖 AI Model Selection")
 selected_model = st.sidebar.selectbox("Choose AI Model:", ["gpt-4o-mini", "gpt-4o"], index=0)
-
-# Embedding Model Selection
 st.sidebar.header("📊 Embedding Model")
 embedding_model_name = st.sidebar.selectbox("Choose Embedding Model:", ["BAAI/bge-small-en-v1.5", "all-MiniLM-L6-v2"], index=0)
-
-# Enhanced Features
 st.sidebar.header("⚡ Enhanced Features")
 enable_streaming = st.sidebar.checkbox("🔄 Enable Streaming Output", value=True)
 enable_context = st.sidebar.checkbox("🧠 Enable Context Awareness", value=True)
 max_context_messages = st.sidebar.slider("📝 Context History Length", 1, 10, 5)
-
-# Advanced Search Controls
 st.sidebar.header("🔍 Advanced Search")
 enable_unified_search = st.sidebar.checkbox("🔗 Unified Search (Products + Notes)", value=True)
 note_context_weight = st.sidebar.slider("📝 Note Context Weight", 0.0, 1.0, 0.3)
 
 # --- Initialization ---
-if 'conversation_history' not in st.session_state:
-    st.session_state.conversation_history = []
-if 'show_note_manager' not in st.session_state:
-    st.session_state.show_note_manager = False
-
-# Initialize the notes database
+if 'conversation_history' not in st.session_state: st.session_state.conversation_history = []
+if 'show_note_manager' not in st.session_state: st.session_state.show_note_manager = False
 notes_db_path = db.init_advanced_notes_database()
-
-# Load embedding model and collections
 embedding_model = emb.load_embedding_model(embedding_model_name)
 if embedding_model:
     embedding_dim = embedding_model.get_sentence_embedding_dimension()
@@ -92,19 +78,17 @@ if embedding_model:
 # --- Sidebar: Advanced Notes UI ---
 st.sidebar.header("📝 Advanced Notes")
 stats = db.get_advanced_notes_stats()
-
-# Display stats and controls
 if stats:
     col1, col2 = st.sidebar.columns(2)
     col1.metric("Total Notes", stats.get("total_notes", 0))
     col2.metric("Need Embedding", stats.get("needs_embedding", 0))
     if stats.get("pending_jobs", 0) > 0 and st.sidebar.button("🚀 Process Embedding Queue"):
         with st.sidebar:
-            processed_count = emb.process_embedding_queue(embedding_model, notes_collection)
+            # FIX: Added the missing 'notes_collection' argument to the function call
+            processed_count = emb.process_embedding_queue(embedding_model, embedding_model_name, notes_collection)
             st.success(f"Processed {processed_count} notes.")
             st.rerun()
 
-# Note creation UI
 with st.sidebar.expander("✨ Create Advanced Note"):
     note_type = st.selectbox("Category:", list(db.NOTE_CATEGORIES.keys()), format_func=lambda x: f"{db.NOTE_CATEGORIES[x]['emoji']} {x.replace('_', ' ').title()}")
     note_title = st.text_input("Title:", placeholder="Enter note title...")
@@ -121,8 +105,6 @@ with st.sidebar.expander("✨ Create Advanced Note"):
             st.warning("Please provide a title and content.")
 
 # --- Main Page UI ---
-
-# Unified Search Section
 st.header("🔍 Unified Search (Products & Notes)")
 query_text = st.text_input("Enter your search query:", placeholder="Search across datasheets and your personal notes...")
 
@@ -149,14 +131,10 @@ if st.button("🚀 Unified Search", type="primary"):
                 utils.add_to_conversation("user", query_text)
                 utils.extract_and_display_unified_results(results)
 
-# Context Management
 with st.expander("Conversation Management"):
-    if st.button("🧹 Clear Conversation History"):
-        utils.clear_conversation_history()
-    if st.button("📋 View Conversation History"):
-        st.json(st.session_state.conversation_history)
+    if st.button("🧹 Clear Conversation History"): utils.clear_conversation_history()
+    if st.button("📋 View Conversation History"): st.json(st.session_state.conversation_history)
 
-# Data Management Section
 with st.expander("🗂️ Data Management"):
     if st.button("📂 Ingest Local Product Embeddings"):
         vdb.ingest_local_embeddings(products_collection)
