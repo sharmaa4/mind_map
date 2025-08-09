@@ -5,5 +5,7 @@ bs4
 pymupdf
 chromadb
 streamlit
+streamlit-lottie
+streamlit-tags
 tqdm
 pydrive2
