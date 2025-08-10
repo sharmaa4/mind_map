@@ -193,6 +193,65 @@ NOTE_CATEGORIES = {
     "lecture_mindmap": {"emoji": "🗺️", "needs_embedding": True, "audio": False, "priority": 7}
 }
 
+# <<< START SOLUTION MODIFICATION >>>
+# Restored the missing function
+def get_advanced_notes_stats():
+    """Get comprehensive statistics about notes and embedding status"""
+    db_path = Path("notes") / "metadata" / "notes_database.db"
+    if not db_path.exists():
+        return {"total_notes": 0, "needs_embedding": 0, "has_embedding": 0, "pending_jobs": 0}
+    
+    conn = sqlite3.connect(str(db_path))
+    
+    try:
+        # Basic stats
+        total_notes = conn.execute("SELECT COUNT(*) FROM notes").fetchone()[0]
+        needs_embedding = conn.execute(
+            "SELECT COUNT(*) FROM notes WHERE has_embedding = FALSE AND note_type IN ({})".format(
+                ','.join(['?' for _ in [k for k, v in NOTE_CATEGORIES.items() if v["needs_embedding"]]])
+            ), 
+            [k for k, v in NOTE_CATEGORIES.items() if v["needs_embedding"]]
+        ).fetchone()[0]
+        has_embedding = conn.execute("SELECT COUNT(*) FROM notes WHERE has_embedding = TRUE").fetchone()[0]
+        
+        # Job queue stats
+        try:
+            pending_jobs = conn.execute("SELECT COUNT(*) FROM embedding_jobs WHERE status = 'pending'").fetchone()[0]
+            processing_jobs = conn.execute("SELECT COUNT(*) FROM embedding_jobs WHERE status = 'processing'").fetchone()[0]
+            failed_jobs = conn.execute("SELECT COUNT(*) FROM embedding_jobs WHERE status = 'failed'").fetchone()[0]
+            completed_jobs = conn.execute("SELECT COUNT(*) FROM embedding_jobs WHERE status = 'completed'").fetchone()[0]
+        except:
+            pending_jobs = processing_jobs = failed_jobs = completed_jobs = 0
+        
+        # Category breakdown
+        try:
+            category_stats = conn.execute("""
+                SELECT note_type, COUNT(*), AVG(COALESCE(search_priority, 1))
+                FROM notes 
+                GROUP BY note_type
+            """).fetchall()
+        except:
+            category_stats = []
+        
+        conn.close()
+        
+        return {
+            "total_notes": total_notes,
+            "needs_embedding": needs_embedding,
+            "has_embedding": has_embedding,
+            "pending_jobs": pending_jobs,
+            "processing_jobs": processing_jobs,
+            "failed_jobs": failed_jobs,
+            "completed_jobs": completed_jobs,
+            "category_breakdown": {cat: {"count": count, "avg_priority": avg_pri} 
+                                  for cat, count, avg_pri in category_stats}
+        }
+    except Exception as e:
+        conn.close()
+        return {"total_notes": 0, "needs_embedding": 0, "has_embedding": 0, "pending_jobs": 0, "error": str(e)}
+
+# <<< END SOLUTION MODIFICATION >>>
+
 def migrate_database_to_phase3():
     db_path = Path("notes") / "metadata" / "notes_database.db"
     if not db_path.exists(): return
@@ -264,7 +323,6 @@ def init_advanced_notes_database():
     migrate_database_to_phase3()
     return str(db_path)
 
-# Other note management functions (save, get stats, etc.) remain the same...
 def save_advanced_note(note_type, title, content, links="", tags="", audio_file=None):
     if note_type not in NOTE_CATEGORIES:
         raise ValueError(f"Invalid note type: {note_type}")
@@ -347,7 +405,6 @@ def generate_note_embeddings_batch_with_progress(note_ids: List[int], embedding_
     conn.close()
     return successful_count
 
-# <<< START SOLUTION MODIFICATION >>>
 def process_all_pending_embeddings():
     """Fetches ALL pending notes and processes their embeddings."""
     db_path = Path("notes") / "metadata" / "notes_database.db"
@@ -379,10 +436,8 @@ def process_all_pending_embeddings():
         embedding_dim = 384 # Default dimension
 
     return generate_note_embeddings_batch_with_progress(note_ids, embedding_model, embedding_dim)
-# <<< END SOLUTION MODIFICATION >>>
 
 def unified_search(query_text, embedding_model_instance, n_results=10, include_notes=True):
-    # This function remains the same
     if not embedding_model_instance:
         return {"products": [], "notes": [], "error": "Embedding model not available"}
     
@@ -443,8 +498,6 @@ col1.metric("With Embeddings", stats["has_embedding"])
 col2.metric("Need Embedding", stats["needs_embedding"])
 col2.metric("Pending Jobs", stats.get("pending_jobs", 0))
 
-# <<< START SOLUTION MODIFICATION >>>
-# Both buttons now call the same robust function
 if stats.get("pending_jobs", 0) > 0:
     if st.sidebar.button("🚀 Process Embedding Queue"):
         processed = process_all_pending_embeddings()
@@ -466,9 +519,7 @@ with st.sidebar.expander("🗂️ Manage All Notes", expanded=False):
             st.rerun()
         else:
             st.info("All notes already have embeddings")
-# <<< END SOLUTION MODIFICATION >>>
 
-# The rest of the sidebar UI remains the same...
 with st.sidebar.expander("✨ Create Advanced Note", expanded=False):
     note_type = st.selectbox(
         "Category:", list(NOTE_CATEGORIES.keys()),
@@ -487,15 +538,8 @@ with st.sidebar.expander("✨ Create Advanced Note", expanded=False):
             st.warning("Please fill in title and content")
 
 # ================================
-# MAIN PAGE UI
+# MAIN PAGE UI (Placeholder)
 # ================================
-# Note Manager and Main Search UI remain the same. 
-# The logic is now corrected in the backend functions.
-
-# (The rest of your app.py code for the main page UI, like the note manager,
-# conversation history, Puter.js component, etc., can remain as it was.)
-
-# A placeholder for the rest of your main UI to keep it functional
 if 'show_note_manager' not in st.session_state:
     st.session_state.show_note_manager = False
 
@@ -514,8 +558,7 @@ query_text = st.text_input(
 
 if st.button("🚀 Search", type="primary"):
     if query_text:
-        # Placeholder for search execution
         st.info(f"Searching for: '{query_text}'")
-        # Here you would call unified_search and display results
+        # Unified search logic would be here
     else:
         st.warning("Please enter a query.")
