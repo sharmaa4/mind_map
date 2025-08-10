@@ -39,25 +39,19 @@ import google_drive_sync as gds
 
 # Configure the Streamlit page
 st.set_page_config(page_title="Global Product Search + Advanced Note Management", layout="wide")
-st.title("🚀 Global Product Search + Advanced Note-Taking System (Phase 3+)")
+st.title("🚀 My Second Brain")
 
 # --- Custom CSS for UI enhancements ---
 st.markdown("""
 <style>
     /* Main container styling for a centered, chat-like experience */
     .main .block-container {
-        max-width: 800px;
+        max-width: 900px; /* Made the container slightly wider */
         padding-top: 2rem;
         margin: 0 auto;
     }
     .stSpinner > div > div {
         border-top-color: #667eea;
-    }
-    /* Style for the AI response container */
-    .ai-response-container {
-        border-radius: 15px;
-        padding: 20px;
-        background-color: #f8f9fa;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1422,12 +1416,45 @@ def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body {{ font-family: 'Segoe UI', sans-serif; margin: 0; background: transparent; }}
-            .container {{ background: #ffffff; padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); border: 1px solid #e0e0e0; }}
-            .model-info {{ background: #f7f9fc; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #2196f3; font-size: 0.95em; }}
+            .container {{ 
+                background: #ffffff; 
+                padding: 20px; 
+                border-radius: 15px; 
+                box-shadow: 0 2px 8px rgba(0,0,0,0.06); 
+                border: 1px solid #e0e0e0; 
+            }}
+            .model-info {{ 
+                background: #f7f9fc; 
+                padding: 10px 15px; 
+                border-radius: 10px; 
+                margin-bottom: 20px; 
+                border-left: 4px solid #2196f3; 
+                font-size: 0.9em; 
+            }}
             .loading {{ display: flex; align-items: center; gap: 10px; color: #666; padding: 15px; }}
-            .spinner {{ border: 3px solid #f3f3f3; border-top: 3px solid #667eea; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }}
+            .spinner {{ 
+                border: 3px solid #f3f3f3; 
+                border-top: 3px solid #667eea; 
+                border-radius: 50%; 
+                width: 20px; 
+                height: 20px; 
+                animation: spin 1s linear infinite; 
+            }}
             @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-            .streaming-text {{ white-space: pre-wrap; line-height: 1.6; color: #333; max-height: 600px; overflow-y: auto; padding: 15px; background: #fafafa; border-radius: 8px; border: 1px solid #e0e0e0; font-family: inherit; min-height: 100px; }}
+            .streaming-text {{ 
+                white-space: pre-wrap; 
+                line-height: 1.7; 
+                color: #333; 
+                font-size: 1.05em; /* Increased font size */
+                max-height: 700px; /* Increased height */
+                overflow-y: auto; 
+                padding: 15px; 
+                background: #fafafa; 
+                border-radius: 8px; 
+                border: 1px solid #e0e0e0; 
+                font-family: inherit; 
+                min-height: 150px; 
+            }}
             .warning {{ background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 15px; border-radius: 8px; margin: 10px 0; }}
             .streaming-cursor {{ animation: blink 1s infinite; font-weight: bold; color: #667eea; }}
             @keyframes blink {{ 0%, 50% {{ opacity: 1; }} 51%, 100% {{ opacity: 0; }} }}
@@ -1490,18 +1517,13 @@ def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
     </body>
     </html>
     """
-    return components.html(puter_html, height=750)
+    return components.html(puter_html, height=800) # Increased component height
 
 def get_structured_output_from_puter_enhanced(concatenated_text, user_query, model="gpt-4o-mini", note_context=""):
     context_prompt = build_context_prompt(user_query, concatenated_text, note_context)
     full_prompt = f"You are a helpful AI assistant. Provide accurate information based on the provided context.\n\n{context_prompt}\n\nPlease provide a comprehensive, well-structured response."
     
-    st.subheader("🤖 AI Response")
-    if enable_context and st.session_state.conversation_history:
-        st.info(f"🧠 Context Active: Remembering {len(st.session_state.conversation_history)} messages")
-    if note_context and enable_unified_search:
-        st.info("📝 Note Context: Including relevant personal notes")
-    
+    # Removed the st.subheader and st.info calls for a cleaner UI
     create_streaming_puter_component(full_prompt, model, enable_streaming)
     add_to_conversation("user", user_query)
     return "Response displayed above"
