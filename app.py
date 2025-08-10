@@ -1449,6 +1449,7 @@ def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
                 color: #333; 
                 font-size: 1.05em;
                 max-height: 600px; /* Adjusted internal scroll height */
+                max-width: 1500px;
                 overflow-y: auto; 
                 padding: 15px; 
                 background: #fafafa; 
