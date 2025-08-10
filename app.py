@@ -1,4 +1,15 @@
 # app.py
+# --- Ensure a modern sqlite provider is used if available (must run before chromadb imports) ---
+import sys
+try:
+    import pysqlite3
+    print("Using pysqlite3 as sqlite3 backend (injected at app.py).")
+    sys.modules["sqlite3"] = pysqlite3
+except Exception as e:
+    # If this fails, we'll continue — but chromadb import may fail later.
+    print(f"pysqlite3 injection failed in app.py (continuing): {e}")
+
+# ---- Regular imports ----
 import streamlit as st
 import pandas as pd
 from pathlib import Path

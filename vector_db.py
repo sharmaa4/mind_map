@@ -1,6 +1,17 @@
 # vector_db.py
 
+# --- Inject pysqlite3 as sqlite3 if available (must be before chromadb import) ---
+import sys
+try:
+    import pysqlite3
+    sys.modules["sqlite3"] = pysqlite3
+    print("[vector_db] Using pysqlite3 as sqlite3 backend (injected in vector_db).")
+except Exception as e:
+    print(f"[vector_db] pysqlite3 injection unavailable: {e} (continuing, chromadb may error if sqlite is too old)")
+
 import streamlit as st
+
+# chromadb import follows after we tried the injection
 import chromadb
 from chromadb.config import Settings
 import os
