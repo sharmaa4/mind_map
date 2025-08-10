@@ -1399,6 +1399,29 @@ def ingest_local_embeddings(collection, embeddings_folder="product_embeddings_v2
 # ENHANCED PUTER.JS COMPONENT
 # ================================
 
+# 1. Replace the existing st.markdown block with this one to set the width to 1500px.
+
+st.markdown("""
+<style>
+    /* Main container styling for a centered, chat-like experience */
+    .main .block-container {
+        max-width: 1500px; /* Increased width as requested */
+        padding-top: 2rem;
+        margin: 0 auto;
+    }
+    .stSpinner > div > div {
+        border-top-color: #667eea;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ================================
+# ENHANCED PUTER.JS COMPONENT
+# ================================
+
+# 2. Replace the entire create_streaming_puter_component function with this updated version.
+#    The only change is the component height from 800 to 700.
+
 def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
     escaped_prompt = prompt.replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
     unique_id = int(time.time() * 1000) % 1000000
@@ -1445,8 +1468,8 @@ def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
                 white-space: pre-wrap; 
                 line-height: 1.7; 
                 color: #333; 
-                font-size: 1.05em; /* Increased font size */
-                max-height: 700px; /* Increased height */
+                font-size: 1.05em;
+                max-height: 600px; /* Adjusted internal scroll height */
                 overflow-y: auto; 
                 padding: 15px; 
                 background: #fafafa; 
@@ -1517,7 +1540,7 @@ def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
     </body>
     </html>
     """
-    return components.html(puter_html, height=800) # Increased component height
+    return components.html(puter_html, height=700) # Adjusted component height
 
 def get_structured_output_from_puter_enhanced(concatenated_text, user_query, model="gpt-4o-mini", note_context=""):
     context_prompt = build_context_prompt(user_query, concatenated_text, note_context)
