@@ -183,11 +183,8 @@ embedding_model = get_global_embedding_model()
 # ================================
 # CHROMADB LOCAL COLLECTION SETUP
 # ================================
-# <<< START SOLUTION MODIFICATION >>>
-# Restored the missing ChromaDB client and collection functions
 @st.cache_resource(show_spinner=False)
 def get_chroma_client(persist_directory="./db_local/"):
-    # Ensure the directory exists after a sync
     os.makedirs(persist_directory, exist_ok=True)
     client = chromadb.PersistentClient(
         path=persist_directory,
@@ -225,7 +222,6 @@ def get_notes_chroma_collection(embedding_dimension=384):
         st.error(f"Error getting notes collection: {e}")
         return None
     return collection
-# <<< END SOLUTION MODIFICATION >>>
 
 # ================================
 # PHASE 3+: NOTE MANAGEMENT & DATABASE
@@ -429,7 +425,6 @@ def process_all_pending_embeddings():
 
     conn = sqlite3.connect(str(db_path))
     try:
-        # Fetch ALL pending jobs without a limit
         pending_jobs = conn.execute("SELECT note_id FROM embedding_jobs WHERE status = 'pending'").fetchall()
     except sqlite3.OperationalError:
         pending_jobs = conn.execute("SELECT id FROM notes WHERE has_embedding = FALSE").fetchall()
@@ -444,7 +439,7 @@ def process_all_pending_embeddings():
     if embedding_model:
         embedding_dim = len(embedding_model.encode("test"))
     else:
-        embedding_dim = 384 # Default dimension
+        embedding_dim = 384
 
     return generate_note_embeddings_batch_with_progress(note_ids, embedding_model, embedding_dim)
 
@@ -549,7 +544,7 @@ with st.sidebar.expander("✨ Create Advanced Note", expanded=False):
             st.warning("Please fill in title and content")
 
 # ================================
-# MAIN PAGE UI (Placeholder for brevity)
+# MAIN PAGE UI (Placeholder)
 # ================================
 if 'show_note_manager' not in st.session_state:
     st.session_state.show_note_manager = False
@@ -570,6 +565,5 @@ query_text = st.text_input(
 if st.button("🚀 Search", type="primary"):
     if query_text:
         st.info(f"Searching for: '{query_text}'")
-        # Placeholder for search execution
     else:
         st.warning("Please enter a query.")
