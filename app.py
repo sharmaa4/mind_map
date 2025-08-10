@@ -1401,10 +1401,15 @@ def ingest_local_embeddings(collection, embeddings_folder="product_embeddings_v2
 
 # 1. Replace the existing st.markdown block with this one to set the width to 1500px.
 
+# Replace the existing st.markdown block with this one
+
 st.markdown("""
 <style>
-    /* Main container styling for a centered, chat-like experience */
-    .main .block-container {
+    /*
+    This is a more specific selector to override Streamlit's default styles.
+    It targets the main content container directly.
+    */
+    section.main > div.block-container {
         max-width: 1500px; /* Increased width as requested */
         padding-top: 2rem;
         margin: 0 auto;
@@ -1414,7 +1419,6 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
 # ================================
 # ENHANCED PUTER.JS COMPONENT
 # ================================
