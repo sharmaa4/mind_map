@@ -1520,7 +1520,7 @@ def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
     </body>
     </html>
     """
-    return components.html(puter_html, height=400, width=400) # Adjusted component height
+    return components.html(puter_html, height=400, width=1500) # Adjusted component height
 
 def get_structured_output_from_puter_enhanced(concatenated_text, user_query, model="gpt-4o-mini", note_context=""):
     context_prompt = build_context_prompt(user_query, concatenated_text, note_context)
