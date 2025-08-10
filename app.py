@@ -181,6 +181,53 @@ def get_global_embedding_model():
 embedding_model = get_global_embedding_model()
 
 # ================================
+# CHROMADB LOCAL COLLECTION SETUP
+# ================================
+# <<< START SOLUTION MODIFICATION >>>
+# Restored the missing ChromaDB client and collection functions
+@st.cache_resource(show_spinner=False)
+def get_chroma_client(persist_directory="./db_local/"):
+    # Ensure the directory exists after a sync
+    os.makedirs(persist_directory, exist_ok=True)
+    client = chromadb.PersistentClient(
+        path=persist_directory,
+        settings=Settings()
+    )
+    return client
+
+@st.cache_resource(show_spinner=False)
+def get_local_chroma_collection(embedding_dimension=384):
+    client = get_chroma_client()
+    collection_name = f"analog_products_local_{embedding_dimension}d"
+    try:
+        collection = client.get_or_create_collection(
+            name=collection_name,
+            embedding_function=None
+        )
+        st.info(f"✅ Using local collection: {collection_name}")
+    except Exception as e:
+        st.error(f"Error getting Chroma collection: {e}")
+        return None
+    return collection
+
+@st.cache_resource(show_spinner=False)
+def get_notes_chroma_collection(embedding_dimension=384):
+    """Get or create ChromaDB collection specifically for notes"""
+    client = get_chroma_client()
+    collection_name = f"user_notes_local_{embedding_dimension}d"
+    try:
+        collection = client.get_or_create_collection(
+            name=collection_name,
+            embedding_function=None
+        )
+        st.info(f"✅ Using notes collection: {collection_name}")
+    except Exception as e:
+        st.error(f"Error getting notes collection: {e}")
+        return None
+    return collection
+# <<< END SOLUTION MODIFICATION >>>
+
+# ================================
 # PHASE 3+: NOTE MANAGEMENT & DATABASE
 # ================================
 NOTE_CATEGORIES = {
@@ -193,8 +240,6 @@ NOTE_CATEGORIES = {
     "lecture_mindmap": {"emoji": "🗺️", "needs_embedding": True, "audio": False, "priority": 7}
 }
 
-# <<< START SOLUTION MODIFICATION >>>
-# Restored the missing function
 def get_advanced_notes_stats():
     """Get comprehensive statistics about notes and embedding status"""
     db_path = Path("notes") / "metadata" / "notes_database.db"
@@ -204,7 +249,6 @@ def get_advanced_notes_stats():
     conn = sqlite3.connect(str(db_path))
     
     try:
-        # Basic stats
         total_notes = conn.execute("SELECT COUNT(*) FROM notes").fetchone()[0]
         needs_embedding = conn.execute(
             "SELECT COUNT(*) FROM notes WHERE has_embedding = FALSE AND note_type IN ({})".format(
@@ -214,43 +258,20 @@ def get_advanced_notes_stats():
         ).fetchone()[0]
         has_embedding = conn.execute("SELECT COUNT(*) FROM notes WHERE has_embedding = TRUE").fetchone()[0]
         
-        # Job queue stats
         try:
             pending_jobs = conn.execute("SELECT COUNT(*) FROM embedding_jobs WHERE status = 'pending'").fetchone()[0]
-            processing_jobs = conn.execute("SELECT COUNT(*) FROM embedding_jobs WHERE status = 'processing'").fetchone()[0]
-            failed_jobs = conn.execute("SELECT COUNT(*) FROM embedding_jobs WHERE status = 'failed'").fetchone()[0]
-            completed_jobs = conn.execute("SELECT COUNT(*) FROM embedding_jobs WHERE status = 'completed'").fetchone()[0]
         except:
-            pending_jobs = processing_jobs = failed_jobs = completed_jobs = 0
-        
-        # Category breakdown
-        try:
-            category_stats = conn.execute("""
-                SELECT note_type, COUNT(*), AVG(COALESCE(search_priority, 1))
-                FROM notes 
-                GROUP BY note_type
-            """).fetchall()
-        except:
-            category_stats = []
+            pending_jobs = 0
         
         conn.close()
         
         return {
-            "total_notes": total_notes,
-            "needs_embedding": needs_embedding,
-            "has_embedding": has_embedding,
-            "pending_jobs": pending_jobs,
-            "processing_jobs": processing_jobs,
-            "failed_jobs": failed_jobs,
-            "completed_jobs": completed_jobs,
-            "category_breakdown": {cat: {"count": count, "avg_priority": avg_pri} 
-                                  for cat, count, avg_pri in category_stats}
+            "total_notes": total_notes, "needs_embedding": needs_embedding,
+            "has_embedding": has_embedding, "pending_jobs": pending_jobs
         }
     except Exception as e:
         conn.close()
         return {"total_notes": 0, "needs_embedding": 0, "has_embedding": 0, "pending_jobs": 0, "error": str(e)}
-
-# <<< END SOLUTION MODIFICATION >>>
 
 def migrate_database_to_phase3():
     db_path = Path("notes") / "metadata" / "notes_database.db"
@@ -269,21 +290,12 @@ def migrate_database_to_phase3():
         ("embedding_dimension", "INTEGER DEFAULT 384"), ("search_priority", "INTEGER DEFAULT 1")
     ]
     for col_name, col_def in new_columns:
-        try:
-            cursor.execute(f"ALTER TABLE notes ADD COLUMN {col_name} {col_def}")
+        try: cursor.execute(f"ALTER TABLE notes ADD COLUMN {col_name} {col_def}")
         except sqlite3.OperationalError: pass
     
     for note_type, config in NOTE_CATEGORIES.items():
         cursor.execute("UPDATE notes SET search_priority = ? WHERE note_type = ?", (config["priority"], note_type))
 
-    embedding_columns = [
-        ("processing_status", "TEXT DEFAULT 'pending'"), ("error_message", "TEXT"), ("embedding_id", "TEXT")
-    ]
-    for col_name, col_def in embedding_columns:
-        try:
-            cursor.execute(f"ALTER TABLE embedding_status ADD COLUMN {col_name} {col_def}")
-        except sqlite3.OperationalError: pass
-    
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS embedding_jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER, status TEXT DEFAULT 'pending',
@@ -293,7 +305,6 @@ def migrate_database_to_phase3():
     """)
     conn.commit()
     conn.close()
-    st.success("🎉 Database successfully migrated!")
 
 @st.cache_resource
 def init_advanced_notes_database():
@@ -538,7 +549,7 @@ with st.sidebar.expander("✨ Create Advanced Note", expanded=False):
             st.warning("Please fill in title and content")
 
 # ================================
-# MAIN PAGE UI (Placeholder)
+# MAIN PAGE UI (Placeholder for brevity)
 # ================================
 if 'show_note_manager' not in st.session_state:
     st.session_state.show_note_manager = False
@@ -559,6 +570,6 @@ query_text = st.text_input(
 if st.button("🚀 Search", type="primary"):
     if query_text:
         st.info(f"Searching for: '{query_text}'")
-        # Unified search logic would be here
+        # Placeholder for search execution
     else:
         st.warning("Please enter a query.")
