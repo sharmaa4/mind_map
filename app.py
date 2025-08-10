@@ -1470,7 +1470,6 @@ def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
             <div id="result_{unique_id}"><div class="loading"><div class="spinner"></div><span>{'Streaming' if stream else 'Processing'} with {model}...</span></div></div>
         </div>
         <script>
-            puter.ui.setWindowWidth(800);
             async function processQuery_{unique_id}() {{
                 const resultDiv = document.getElementById('result_{unique_id}');
                 const fallbacks = {json.dumps(fallback_models.get(model, []))};
@@ -1521,7 +1520,7 @@ def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
     </body>
     </html>
     """
-    return components.html(puter_html, height=700) # Adjusted component height
+    return components.html(puter_html, height=100) # Adjusted component height
 
 def get_structured_output_from_puter_enhanced(concatenated_text, user_query, model="gpt-4o-mini", note_context=""):
     context_prompt = build_context_prompt(user_query, concatenated_text, note_context)
