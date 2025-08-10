@@ -829,7 +829,7 @@ def get_local_chroma_collection(embedding_dimension=384):
             name=collection_name,
             embedding_function=None
         )
-        st.info(f"✅ Using local collection: {collection_name}")
+        #st.info(f"✅ Using local collection: {collection_name}")
     except Exception as e:
         st.error(f"Error getting Chroma collection: {e}")
         return None
@@ -845,7 +845,7 @@ def get_notes_chroma_collection(embedding_dimension=384):
             name=collection_name,
             embedding_function=None
         )
-        st.info(f"✅ Using notes collection: {collection_name}")
+        #st.info(f"✅ Using notes collection: {collection_name}")
     except Exception as e:
         st.error(f"Error getting notes collection: {e}")
         return None
