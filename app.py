@@ -1470,6 +1470,7 @@ def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
             <div id="result_{unique_id}"><div class="loading"><div class="spinner"></div><span>{'Streaming' if stream else 'Processing'} with {model}...</span></div></div>
         </div>
         <script>
+            puter.ui.setWindowWidth(800);
             async function processQuery_{unique_id}() {{
                 const resultDiv = document.getElementById('result_{unique_id}');
                 const fallbacks = {json.dumps(fallback_models.get(model, []))};
