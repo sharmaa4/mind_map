@@ -44,42 +44,20 @@ st.title("🚀 Global Product Search + Advanced Note-Taking System (Phase 3+)")
 # --- Custom CSS for UI enhancements ---
 st.markdown("""
 <style>
-    /* Main container styling */
+    /* Main container styling for a centered, chat-like experience */
     .main .block-container {
+        max-width: 800px;
         padding-top: 2rem;
-    }
-    /* Result card styling */
-    .result-card {
-        border: 1px solid #e0e0e0;
-        border-radius: 10px;
-        padding: 15px;
-        margin-bottom: 10px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-        transition: box-shadow 0.3s ease-in-out;
-    }
-    .result-card:hover {
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }
-    .result-card h4 {
-        margin-top: 0;
-        margin-bottom: 5px;
-        color: #2c3e50;
-        font-size: 1.1em;
-    }
-    .result-card .source-info {
-        font-size: 0.9em;
-        color: #7f8c8d;
-        margin-bottom: 10px;
-    }
-    .result-card .content-snippet {
-        font-size: 0.95em;
-        color: #34495e;
-        max-height: 100px;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        margin: 0 auto;
     }
     .stSpinner > div > div {
         border-top-color: #667eea;
+    }
+    /* Style for the AI response container */
+    .ai-response-container {
+        border-radius: 15px;
+        padding: 20px;
+        background-color: #f8f9fa;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1449,7 +1427,7 @@ def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
             .loading {{ display: flex; align-items: center; gap: 10px; color: #666; padding: 15px; }}
             .spinner {{ border: 3px solid #f3f3f3; border-top: 3px solid #667eea; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }}
             @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-            .streaming-text {{ white-space: pre-wrap; line-height: 1.6; color: #333; max-height: 500px; overflow-y: auto; padding: 15px; background: #fafafa; border-radius: 8px; border: 1px solid #e0e0e0; font-family: inherit; min-height: 100px; }}
+            .streaming-text {{ white-space: pre-wrap; line-height: 1.6; color: #333; max-height: 600px; overflow-y: auto; padding: 15px; background: #fafafa; border-radius: 8px; border: 1px solid #e0e0e0; font-family: inherit; min-height: 100px; }}
             .warning {{ background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 15px; border-radius: 8px; margin: 10px 0; }}
             .streaming-cursor {{ animation: blink 1s infinite; font-weight: bold; color: #667eea; }}
             @keyframes blink {{ 0%, 50% {{ opacity: 1; }} 51%, 100% {{ opacity: 0; }} }}
@@ -1512,7 +1490,7 @@ def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
     </body>
     </html>
     """
-    return components.html(puter_html, height=650)
+    return components.html(puter_html, height=750)
 
 def get_structured_output_from_puter_enhanced(concatenated_text, user_query, model="gpt-4o-mini", note_context=""):
     context_prompt = build_context_prompt(user_query, concatenated_text, note_context)
@@ -1527,47 +1505,6 @@ def get_structured_output_from_puter_enhanced(concatenated_text, user_query, mod
     create_streaming_puter_component(full_prompt, model, enable_streaming)
     add_to_conversation("user", user_query)
     return "Response displayed above"
-
-# ================================
-# UTILITY FUNCTIONS
-# ================================
-
-def display_unified_results_cards(unified_results):
-    """Displays unified search results in a styled card format."""
-    if not unified_results.get("combined"):
-        st.info("No relevant documents found.")
-        return
-    
-    st.subheader("📄 Source Documents")
-    
-    for idx, result in enumerate(unified_results["combined"], start=1):
-        source_emoji = "🏭" if result["source"] == "product" else "📝"
-        source_text = "Product" if result["source"] == "product" else "Personal Note"
-        relevance = result["relevance_score"]
-        
-        title = result['metadata'].get('product', result['metadata'].get('title', 'Unknown'))
-        
-        with st.container():
-            st.markdown(f"""
-            <div class="result-card">
-                <h4>{source_emoji} {title}</h4>
-                <div class="source-info">
-                    <strong>Source:</strong> {source_text} | <strong>Relevance:</strong> {relevance:.2f}
-                </div>
-                <div class="content-snippet">
-                    {result['content'][:300]}...
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            with st.expander("View Details & Links"):
-                st.write(f"**Full Content Snippet:**")
-                st.text(result['content'])
-                if result["source"] == "product":
-                    st.write(f"**Links:** {result['metadata'].get('links', 'No links')}")
-                else:
-                    st.write(f"**Note Links:** {result['metadata'].get('links', 'No links')}")
-                    st.write(f"**Tags:** {result['metadata'].get('tags', 'No tags')}")
 
 # ================================
 # MAIN SEARCH UI
@@ -1592,39 +1529,31 @@ with tab1:
         if not query_text:
             st.warning("Please enter a query.")
         else:
-            # --- UI LAYOUT ---
-            left_col, right_col = st.columns([2, 1])
-            
-            with left_col:
-                with st.spinner("🧠 Thinking... Performing unified search and generating response..."):
-                    # Perform search
-                    unified_results = unified_search(
-                        query_text, 
-                        embedding_model, 
-                        n_results=10, 
-                        include_notes=enable_unified_search
-                    )
+            with st.spinner("🧠 Thinking... Performing unified search and generating response..."):
+                # Perform search
+                unified_results = unified_search(
+                    query_text, 
+                    embedding_model, 
+                    n_results=10, 
+                    include_notes=enable_unified_search
+                )
+                
+                if unified_results.get("error"):
+                    st.error(f"❌ Search error: {unified_results['error']}")
+                elif not unified_results.get("combined"):
+                    st.warning("No relevant results found to generate a response.")
+                else:
+                    st.success("✅ Search complete! Generating AI summary...")
+                    product_context = "\n\n".join([r['content'] for r in unified_results["combined"] if r['source'] == 'product'][:5])
+                    note_context = "\n\n".join([r['content'] for r in unified_results["combined"] if r['source'] == 'note'][:5])
                     
-                    if unified_results.get("error"):
-                        st.error(f"❌ Search error: {unified_results['error']}")
-                    elif not unified_results.get("combined"):
-                        st.warning("No relevant results found to generate a response.")
-                    else:
-                        st.success("✅ Search complete! Generating AI summary...")
-                        product_context = "\n\n".join([r['content'] for r in unified_results["combined"] if r['source'] == 'product'][:5])
-                        note_context = "\n\n".join([r['content'] for r in unified_results["combined"] if r['source'] == 'note'][:5])
-                        
-                        # Display AI response in the left column
-                        get_structured_output_from_puter_enhanced(
-                            product_context, 
-                            query_text, 
-                            model=selected_model,
-                            note_context=note_context
-                        )
-                        
-                        # Display results in the right column
-                        with right_col:
-                            display_unified_results_cards(unified_results)
+                    # Display AI response in the main column
+                    get_structured_output_from_puter_enhanced(
+                        product_context, 
+                        query_text, 
+                        model=selected_model,
+                        note_context=note_context
+                    )
 
 # ================================
 # DATA MANAGEMENT IN SETTINGS TAB
