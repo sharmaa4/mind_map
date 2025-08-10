@@ -15,7 +15,7 @@ from database import (
 )
 from google_drive_sync import sync_from_gdrive, sync_to_gdrive
 from embeddings import load_embedding_model, process_embedding_queue
-from vector_db import get_notes_chroma_collection, NOTES_COLLECTION_NAME
+from vector_db import get_notes_chroma_collection
 from search import search_notes
 
 # ─────────────────────────────────────────
@@ -69,7 +69,12 @@ if st.sidebar.button("Save Note"):
             created_at=datetime.now()
         )
         st.sidebar.success(f"Note '{new_title}' created!")
-        process_embedding_queue()  # Keep embeddings updated
+        # Since we are creating a new note, we should process the embedding queue
+        embedding_model = load_embedding_model()
+        notes_collection = get_notes_chroma_collection()
+        if embedding_model and notes_collection:
+            process_embedding_queue(embedding_model, "BAAI/bge-small-en-v1.5", notes_collection)
+
 
 st.sidebar.markdown("---")
 
@@ -78,15 +83,26 @@ st.sidebar.markdown("---")
 # ─────────────────────────────────────────
 st.subheader("Search Notes")
 query = st.text_input("Enter search query")
+
+# Load model and collection for search
+embedding_model = load_embedding_model()
+notes_collection = get_notes_chroma_collection()
+
+
 if st.button("Search"):
     if query.strip():
-        results = search_notes(query)
-        if results:
-            st.write("### Search Results")
-            for r in results:
-                st.write(f"- **{r['title']}**: {r['content'][:100]}...")
+        if embedding_model is not None and notes_collection is not None:
+            results = search_notes(query, embedding_model, notes_collection)
+            if results and results.get("documents") and results["documents"][0]:
+                st.write("### Search Results")
+                for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
+                    title = meta.get('title', 'No Title')
+                    st.write(f"- **{title}**: {doc[:100]}...")
+            else:
+                st.info("No matching notes found.")
         else:
-            st.info("No matching notes found.")
+            st.error("Embedding model or notes collection could not be loaded.")
+
 
 st.markdown("---")
 
@@ -103,11 +119,10 @@ def display_notes_table(limit: int = 200):
     for note_id, note_type, title, content_path, links, created_at in rows:
         st.markdown(f"**{title}** ({created_at})")
         if content_path and Path(content_path).exists():
-            with open(content_path, "r") as f:
+            with open(content_path, "r", encoding="utf-8") as f:
                 preview = f.read(200)
                 st.code(preview)
         else:
             st.code("[Content missing]")
 
 display_notes_table(limit=200)
-
