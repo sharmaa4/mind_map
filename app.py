@@ -93,6 +93,40 @@ def queue_synced_notes_for_embedding():
     finally:
         conn.close()
 
+def inspect_database():
+    """
+    Connects to the notes database and prints the contents of the 'notes' table,
+    focusing on the has_embedding flag.
+    """
+    db_path = Path("notes") / "metadata" / "notes_database.db"
+    
+    if not db_path.exists():
+        print(f"Database file not found at: {db_path}")
+        print("Please make sure you have run the application at least once to create the database.")
+        return
+
+    print(f"Connecting to database at: {db_path}")
+    conn = sqlite3.connect(str(db_path))
+    
+    try:
+        # Use pandas to easily display the table in a readable format
+        # This will read the entire 'notes' table into a DataFrame
+        df = pd.read_sql_query("SELECT id, title, has_embedding, note_type FROM notes", conn)
+        
+        print("\n--- Contents of the 'notes' table ---")
+        if df.empty:
+            print("The 'notes' table is empty.")
+        else:
+            # Print the DataFrame to the console
+            print(df.to_string())
+            
+    except Exception as e:
+        print(f"\nAn error occurred while reading the database: {e}")
+        print("This might happen if the 'notes' table or columns don't exist yet.")
+    finally:
+        conn.close()
+        print("\nDatabase connection closed.")
+
 
 # Function to run the initial sync from Google Drive
 @st.cache_resource(show_spinner="Connecting to Google Drive and syncing data...")
@@ -109,9 +143,8 @@ def initial_sync():
         # Sync the pre-computed product embeddings
         gds.sync_directory_from_drive(drive, "product_embeddings_v2")
 
-        # Queue synced notes for embedding
-        queue_synced_notes_for_embedding()
-        
+        inspect_database()
+
         return drive
     except Exception as e:
         st.error(f"Fatal Error: Could not sync with Google Drive. Please check credentials. Details: {e}")
