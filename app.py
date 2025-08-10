@@ -48,12 +48,57 @@ if 'drive_synced' not in st.session_state:
 if 'drive_instance' not in st.session_state:
     st.session_state.drive_instance = None
 
+# <<< START SOLUTION MODIFICATION >>>
+def queue_synced_notes_for_embedding():
+    """
+    Scans the database for notes without embeddings and queues them.
+    This is essential for processing notes synced from Google Drive.
+    """
+    db_path = Path("notes") / "metadata" / "notes_database.db"
+    if not db_path.exists():
+        return 0
+
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+
+    try:
+        # Find notes that need an embedding but don't have a pending job
+        cursor.execute("""
+            SELECT id FROM notes n
+            WHERE n.has_embedding = FALSE AND NOT EXISTS (
+                SELECT 1 FROM embedding_jobs j
+                WHERE j.note_id = n.id AND j.status = 'pending'
+            )
+        """)
+        notes_to_queue = cursor.fetchall()
+
+        if not notes_to_queue:
+            return 0
+
+        # Add a pending job for each missing note
+        for note_id_tuple in notes_to_queue:
+            note_id = note_id_tuple[0]
+            cursor.execute("""
+                INSERT INTO embedding_jobs (note_id, status)
+                VALUES (?, 'pending')
+            """, (note_id,))
+        
+        conn.commit()
+        st.info(f"✅ Queued {len(notes_to_queue)} synced notes for embedding generation.")
+        return len(notes_to_queue)
+
+    except sqlite3.OperationalError as e:
+        st.warning(f"Could not queue synced notes (database might be old): {e}")
+        return 0
+    finally:
+        conn.close()
+
+
 # Function to run the initial sync from Google Drive
 @st.cache_resource(show_spinner="Connecting to Google Drive and syncing data...")
 def initial_sync():
     """
-    Authenticates with Google Drive and downloads the 'notes' and 
-    'product_embeddings_v2' directories. This runs only once.
+    Authenticates with Google Drive, downloads data, and queues synced notes.
     """
     try:
         drive = gds.authenticate_gdrive()
@@ -63,11 +108,15 @@ def initial_sync():
         
         # Sync the pre-computed product embeddings
         gds.sync_directory_from_drive(drive, "product_embeddings_v2")
+
+        # Queue synced notes for embedding
+        queue_synced_notes_for_embedding()
         
         return drive
     except Exception as e:
         st.error(f"Fatal Error: Could not sync with Google Drive. Please check credentials. Details: {e}")
         return None
+# <<< END SOLUTION MODIFICATION >>>
 
 # Perform the initial sync when the app starts
 if not st.session_state.drive_synced:
@@ -2073,4 +2122,3 @@ st.markdown(f"""
 
 **Background Embedding Status:** ✅ Working with real-time progress display and status tracking!
 """)
-
