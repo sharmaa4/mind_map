@@ -1,151 +1,83 @@
-# google_drive_sync.py
-"""
-Google Drive sync helpers that support service-account credentials stored in Streamlit secrets.
-Accepts service account under st.secrets["gcp_service_account"] (matches your .toml).
-Falls back to st.secrets["gdrive_service_account_json"] (legacy) or interactive LocalWebserverAuth()
-if a client_secrets.json file is present.
-"""
-
-import streamlit as st
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-from oauth2client.service_account import ServiceAccountCredentials
-import os
-import zipfile
 import io
-import shutil
-import tempfile
-import json
+import os
+import streamlit as st
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
+from google.oauth2 import service_account
+from database import migrate_database
 
-# The top-level local path where the zip contents will be extracted.
-LOCAL_BASE_NOTES_DIR = os.path.join(os.getcwd(), "notes")
+# Google Drive parent folder ID from secrets.toml
+PARENT_FOLDER_ID = st.secrets["parent_folder_id"]
 
+# Database file name
+DB_FILENAME = "notes.db"
 
-def authenticate_gdrive():
-    """
-    Authenticate to Google Drive.
+# Load GCP service account credentials from secrets.toml
+def _get_drive_service():
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    creds = service_account.Credentials.from_service_account_info(creds_dict)
+    return build("drive", "v3", credentials=creds)
 
-    Priority:
-      1. Service account JSON provided in st.secrets["gcp_service_account"] (preferred)
-      2. Raw service account JSON in st.secrets["gdrive_service_account_json"] (legacy)
-      3. Local interactive OAuth via client_secrets.json + LocalWebserverAuth()
+def upload_file_to_gdrive():
+    """Uploads the local DB file to Google Drive (overwrites existing)."""
+    service = _get_drive_service()
 
-    Returns:
-      GoogleDrive instance on success, raises Exception on failure.
-    """
-    scopes = ["https://www.googleapis.com/auth/drive"]
+    # Search if file already exists in the GDrive folder
+    query = f"'{PARENT_FOLDER_ID}' in parents and name = '{DB_FILENAME}'"
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    files = results.get("files", [])
 
-    def _to_plain(obj):
-        """
-        Recursively convert AttrDict-like or mapping objects into plain dicts,
-        leaving primitive values untouched.
-        """
-        from collections.abc import Mapping
+    if files:
+        file_id = files[0]["id"]
+        media = MediaFileUpload(DB_FILENAME, resumable=True)
+        service.files().update(fileId=file_id, media_body=media).execute()
+        st.success("✅ Database updated in Google Drive.")
+    else:
+        file_metadata = {"name": DB_FILENAME, "parents": [PARENT_FOLDER_ID]}
+        media = MediaFileUpload(DB_FILENAME, resumable=True)
+        service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+        st.success("✅ Database uploaded to Google Drive.")
 
-        if isinstance(obj, Mapping):
-            return {k: _to_plain(v) for k, v in obj.items()}
-        if isinstance(obj, (list, tuple)):
-            return [_to_plain(v) for v in obj]
-        return obj
+def download_file_from_gdrive():
+    """Downloads the DB file from Google Drive and runs migration."""
+    service = _get_drive_service()
 
-    # 1) Service account from st.secrets["gcp_service_account"]
-    if "gcp_service_account" in st.secrets:
-        raw_sa = st.secrets["gcp_service_account"]
-        try:
-            sa_info = _to_plain(raw_sa)
-            tf = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
-            tf.write(json.dumps(sa_info, ensure_ascii=False).encode("utf-8"))
-            tf.flush()
-            tf.close()
+    query = f"'{PARENT_FOLDER_ID}' in parents and name = '{DB_FILENAME}'"
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    files = results.get("files", [])
 
-            creds = ServiceAccountCredentials.from_json_keyfile_name(tf.name, scopes)
-            gauth = GoogleAuth()
-            gauth.credentials = creds
-            drive = GoogleDrive(gauth)
+    if not files:
+        st.warning("⚠️ No database file found in Google Drive.")
+        return
 
-            try:
-                os.unlink(tf.name)
-            except Exception:
-                pass
+    file_id = files[0]["id"]
+    request = service.files().get_media(fileId=file_id)
 
-            return drive
-        except Exception as e:
-            try:
-                os.unlink(tf.name)
-            except Exception:
-                pass
-            raise RuntimeError(f"[google_drive_sync] Service-account auth (gcp_service_account) failed: {e}")
+    with io.FileIO(DB_FILENAME, "wb") as fh:
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
 
-    # 2) Older key name compatibility
-    if "gdrive_service_account_json" in st.secrets:
-        raw_sa = st.secrets["gdrive_service_account_json"]
-        try:
-            sa_info = _to_plain(raw_sa)
-            tf = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
-            tf.write(json.dumps(sa_info, ensure_ascii=False).encode("utf-8"))
-            tf.flush()
-            tf.close()
+    st.success("✅ Database downloaded from Google Drive.")
 
-            creds = ServiceAccountCredentials.from_json_keyfile_name(tf.name, scopes)
-            gauth = GoogleAuth()
-            gauth.credentials = creds
-            drive = GoogleDrive(gauth)
+    # Run migration to ensure schema is up-to-date
+    migrate_database()
+    st.info("🔄 Database schema upgraded (if needed).")
 
-            try:
-                os.unlink(tf.name)
-            except Exception:
-                pass
+def sync_with_gdrive():
+    """Handles the sync operation."""
+    st.subheader("📂 Google Drive Sync")
 
-            return drive
-        except Exception as e:
-            try:
-                os.unlink(tf.name)
-            except Exception:
-                pass
-            raise RuntimeError(f"[google_drive_sync] Service-account auth (gdrive_service_account_json) failed: {e}")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("⬆️ Upload to Drive"):
+            if os.path.exists(DB_FILENAME):
+                upload_file_to_gdrive()
+            else:
+                st.error("❌ No local database file found to upload.")
 
-    # 3) Local interactive auth using client_secrets.json (fallback)
-    try:
-        gauth = GoogleAuth()
-        gauth.LocalWebserverAuth()
-        drive = GoogleDrive(gauth)
-        return drive
-    except Exception as e:
-        raise RuntimeError(f"[google_drive_sync] Interactive Drive auth failed or client_secrets.json missing: {e}")
-
-
-def sync_directory_from_drive(drive: GoogleDrive, local_path: str = LOCAL_BASE_NOTES_DIR, parent_folder_id: str = None) -> str:
-    """
-    Downloads <local_path>.zip from Google Drive (top-level folder id from secrets or root)
-    and extracts it into local_path. Returns the absolute local_path where files are extracted.
-    """
-    if parent_folder_id is None:
-        parent_folder_id = st.secrets.get("parent_folder_id", "root")
-
-    file_name = f"{os.path.basename(local_path)}.zip"
-    query = f"'{parent_folder_id}' in parents and title='{file_name}' and trashed=false"
-    try:
-        file_list = drive.ListFile({"q": query}).GetList()
-    except Exception as e:
-        raise RuntimeError(f"[google_drive_sync] Drive listing failed: {e}")
-
-    if not file_list:
-        print(f"[google_drive_sync] No zip '{file_name}' found in Drive folder {parent_folder_id}.")
-        return os.path.abspath(local_path)
-
-    gfile = file_list[0]
-    print(f"[google_drive_sync] Downloading '{file_name}' from Google Drive (id={gfile.get('id')})...")
-    download_stream = gfile.GetContentIOBuffer()
-    zip_buffer = io.BytesIO(download_stream.read())
-
-    if os.path.exists(local_path):
-        shutil.rmtree(local_path)
-    os.makedirs(local_path, exist_ok=True)
-
-    with zipfile.ZipFile(zip_buffer, "r") as zf:
-        zf.extractall(local_path)
-
-    abs_path = os.path.abspath(local_path)
-    print(f"[google_drive_sync] Successfully synced and extracted to '{abs_path}'.")
-    return abs_path
+    with col2:
+        if st.button("⬇️ Download from Drive"):
+            download_file_from_gdrive()
 
