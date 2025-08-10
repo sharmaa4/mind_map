@@ -17,7 +17,7 @@ import time
 
 # ---- imports from your modules ----
 import google_drive_sync as gds
-from google_drive_sync import sync_directory_from_drive  # convenience, but we use gds.authenticate_gdrive too
+from google_drive_sync import sync_directory_from_drive  # convenience
 from database import (
     init_advanced_notes_database,
     scan_and_queue_new_notes,
@@ -42,17 +42,16 @@ def _get_collection():
 try:
     notes_collection = _get_collection()
 except Exception as e:
-    # If chromadb fails to import / init, we still allow the app to run (search will fail gracefully)
     notes_collection = None
     st.warning(f"Chroma collection unavailable: {e}")
 
-# Cached model load (embeddings.py already caches, but this provides a local handle)
+# Cached model load
 EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 embedding_model = load_embedding_model(EMBEDDING_MODEL_NAME)
 
 
 # -----------------------------
-# Google Drive initial sync logic (from your backup, adapted safely)
+# Google Drive initial sync logic (safe)
 # -----------------------------
 if "drive_synced" not in st.session_state:
     st.session_state.drive_synced = False
@@ -65,28 +64,21 @@ def initial_sync():
     Authenticates with Google Drive and downloads the 'notes' directory.
     This runs only once per Streamlit run (cached). It will raise on failure.
     """
-    try:
-        # Attempt to authenticate (gds.authenticate_gdrive may raise)
-        drive = gds.authenticate_gdrive()
-        # Sync the notes directory (contains SQLite DB and .txt files)
-        gds.sync_directory_from_drive(drive, "notes")
-        return drive
-    except Exception as e:
-        # bubble up error so caller can show a meaningful message
-        raise
+    drive = gds.authenticate_gdrive()
+    gds.sync_directory_from_drive(drive, "notes")
+    return drive
 
-# replace the existing _have_drive_credentials_for_autosync function with this
 def _have_drive_credentials_for_autosync() -> bool:
-    # Service account in st.secrets under the key you provided in .toml
+    # accept the key you showed in .toml
     if "gcp_service_account" in st.secrets:
         return True
-    # Older key (if present)
     if "gdrive_service_account_json" in st.secrets:
         return True
     # Local client_secrets.json file in app root (used by LocalWebserverAuth)
     if os.path.exists("client_secrets.json"):
         return True
     return False
+
 
 # ---- Helper UI functions ----
 def display_notes_table(limit: int = 200):
@@ -108,7 +100,7 @@ def run_sync_and_scan(drive=None, parent_folder_id=None):
         except Exception as e:
             st.error(f"Drive sync failed: {e}")
             return False
-    # Register files into DB (guarded init inside function)
+    # Register files into DB
     st.info("Scanning local notes and queueing embeddings (if needed)...")
     try:
         scan_and_queue_new_notes()
@@ -177,7 +169,6 @@ with right_col:
             drive = gds.authenticate_gdrive()
             if drive:
                 st.session_state.drive_instance = drive
-                # Sync and scan
                 ok = run_sync_and_scan(drive=drive)
                 if ok:
                     st.session_state.drive_synced = True
@@ -186,7 +177,7 @@ with right_col:
         except Exception as e:
             st.error(f"Drive auth/sync error: {e}")
 
-    # Manual scan (useful if you drop files into notes/ folder locally)
+    # Manual scan
     if st.button("Scan local notes & queue"):
         run_sync_and_scan(drive=None)
 
@@ -220,26 +211,24 @@ with right_col:
 
 with left_col:
     # On-first-load actions: optionally auto-sync then scan
-    # SAFE BEHAVIOUR: only auto-run initial_sync if we have credentials available to avoid the client_secrets.json error
     if not st.session_state.drive_synced:
         if _have_drive_credentials_for_autosync():
             try:
-                # run initial_sync (cached). It will raise if creds invalid.
                 drive = initial_sync()
                 st.session_state.drive_instance = drive
                 st.session_state.drive_synced = True
                 st.sidebar.success("✅ Synced with Google Drive!")
             except Exception as e:
                 st.session_state.drive_synced = False
-                st.sidebar.error(f"❌ Google Drive sync failed. See Actions -> Authenticate & Sync. Details: {e}")
+                st.sidebar.error(f"❌ Google Drive sync failed. Use Actions -> Authenticate & Sync. Details: {e}")
         else:
-            st.sidebar.info("Auto-sync skipped (no drive credentials). Use 'Authenticate & Sync from Drive' button in Actions to sync.")
+            st.sidebar.info("Auto-sync skipped (no drive credentials). Use 'Authenticate & Sync from Drive' in Actions to sync.")
 
-    # Sidebar-like note creation area (left pane top)
+    # Note creation area
     st.subheader("Create a new note")
     with st.form("create_note_form", clear_on_submit=False):
         title = st.text_input("Title", "")
-        from database import NOTE_CATEGORIES  # read categories from database module
+        from database import NOTE_CATEGORIES
         category = st.selectbox("Category", options=list(NOTE_CATEGORIES.keys()), index=0)
         tags = st.text_input("Tags (comma-separated)", "")
         links = st.text_input("Links (comma-separated)", "")
@@ -253,7 +242,6 @@ with left_col:
                 try:
                     note_id = save_advanced_note(category, title or "Untitled", content, links=links, tags=tags)
                     st.success(f"Saved note (id={note_id}).")
-                    # optionally run scan to be safe (but save already inserted)
                     scan_and_queue_new_notes()
                     if embed_now:
                         run_process_embedding_queue(limit=10)
@@ -261,7 +249,7 @@ with left_col:
                     st.error(f"Failed to save note: {e}")
 
     st.markdown("---")
-    # Simple semantic search
+    # Semantic search
     st.subheader("Semantic search")
     q = st.text_input("Query", "")
     top_k = st.slider("Top K", min_value=1, max_value=20, value=5)

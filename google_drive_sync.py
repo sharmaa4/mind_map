@@ -2,7 +2,7 @@
 """
 Google Drive sync helpers that support service-account credentials stored in Streamlit secrets.
 Accepts service account under st.secrets["gcp_service_account"] (matches your .toml).
-Falls back to st.secrets["gdrive_service_account_json"] (older key) or interactive LocalWebserverAuth()
+Falls back to st.secrets["gdrive_service_account_json"] (legacy) or interactive LocalWebserverAuth()
 if a client_secrets.json file is present.
 """
 
@@ -26,23 +26,35 @@ def authenticate_gdrive():
     Authenticate to Google Drive.
 
     Priority:
-      1. Service account JSON provided in st.secrets["gcp_service_account"] (preferred; matches your .toml)
+      1. Service account JSON provided in st.secrets["gcp_service_account"] (preferred)
       2. Raw service account JSON in st.secrets["gdrive_service_account_json"] (legacy)
       3. Local interactive OAuth via client_secrets.json + LocalWebserverAuth()
 
     Returns:
       GoogleDrive instance on success, raises Exception on failure.
     """
-    # Scopes needed for Drive access
     scopes = ["https://www.googleapis.com/auth/drive"]
 
-    # 1) Service account from secrets under the gcp_service_account key (as in your .toml)
+    def _to_plain(obj):
+        """
+        Recursively convert AttrDict-like or mapping objects into plain dicts,
+        leaving primitive values untouched.
+        """
+        from collections.abc import Mapping
+
+        if isinstance(obj, Mapping):
+            return {k: _to_plain(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_to_plain(v) for v in obj]
+        return obj
+
+    # 1) Service account from st.secrets["gcp_service_account"]
     if "gcp_service_account" in st.secrets:
-        sa_info = st.secrets["gcp_service_account"]
+        raw_sa = st.secrets["gcp_service_account"]
         try:
-            # Write to a temporary json file because oauth libs commonly expect a filepath
+            sa_info = _to_plain(raw_sa)
             tf = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
-            tf.write(json.dumps(sa_info).encode("utf-8"))
+            tf.write(json.dumps(sa_info, ensure_ascii=False).encode("utf-8"))
             tf.flush()
             tf.close()
 
@@ -51,7 +63,6 @@ def authenticate_gdrive():
             gauth.credentials = creds
             drive = GoogleDrive(gauth)
 
-            # Remove temp file - credentials already loaded
             try:
                 os.unlink(tf.name)
             except Exception:
@@ -59,7 +70,6 @@ def authenticate_gdrive():
 
             return drive
         except Exception as e:
-            # try to remove temp file if something failed
             try:
                 os.unlink(tf.name)
             except Exception:
@@ -68,10 +78,11 @@ def authenticate_gdrive():
 
     # 2) Older key name compatibility
     if "gdrive_service_account_json" in st.secrets:
-        sa_info = st.secrets["gdrive_service_account_json"]
+        raw_sa = st.secrets["gdrive_service_account_json"]
         try:
+            sa_info = _to_plain(raw_sa)
             tf = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
-            tf.write(json.dumps(sa_info).encode("utf-8"))
+            tf.write(json.dumps(sa_info, ensure_ascii=False).encode("utf-8"))
             tf.flush()
             tf.close()
 
@@ -96,7 +107,6 @@ def authenticate_gdrive():
     # 3) Local interactive auth using client_secrets.json (fallback)
     try:
         gauth = GoogleAuth()
-        # LocalWebserverAuth() expects client_secrets.json in the app root or a settings.yaml configured.
         gauth.LocalWebserverAuth()
         drive = GoogleDrive(gauth)
         return drive
@@ -112,10 +122,7 @@ def sync_directory_from_drive(drive: GoogleDrive, local_path: str = LOCAL_BASE_N
     if parent_folder_id is None:
         parent_folder_id = st.secrets.get("parent_folder_id", "root")
 
-    # the expected Drive filename is <folder_name>.zip
     file_name = f"{os.path.basename(local_path)}.zip"
-
-    # Query the parent folder for that exact zip name
     query = f"'{parent_folder_id}' in parents and title='{file_name}' and trashed=false"
     try:
         file_list = drive.ListFile({"q": query}).GetList()
@@ -123,7 +130,6 @@ def sync_directory_from_drive(drive: GoogleDrive, local_path: str = LOCAL_BASE_N
         raise RuntimeError(f"[google_drive_sync] Drive listing failed: {e}")
 
     if not file_list:
-        # Nothing to download; return the intended local path (caller will handle absence gracefully)
         print(f"[google_drive_sync] No zip '{file_name}' found in Drive folder {parent_folder_id}.")
         return os.path.abspath(local_path)
 
@@ -132,7 +138,6 @@ def sync_directory_from_drive(drive: GoogleDrive, local_path: str = LOCAL_BASE_N
     download_stream = gfile.GetContentIOBuffer()
     zip_buffer = io.BytesIO(download_stream.read())
 
-    # remove existing local_path and extract fresh
     if os.path.exists(local_path):
         shutil.rmtree(local_path)
     os.makedirs(local_path, exist_ok=True)
