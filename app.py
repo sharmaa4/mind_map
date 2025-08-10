@@ -48,7 +48,6 @@ if 'drive_synced' not in st.session_state:
 if 'drive_instance' not in st.session_state:
     st.session_state.drive_instance = None
 
-# <<< START SOLUTION MODIFICATION >>>
 def queue_synced_notes_for_embedding():
     """
     Scans the database for notes without embeddings and queues them.
@@ -93,39 +92,35 @@ def queue_synced_notes_for_embedding():
     finally:
         conn.close()
 
-def inspect_database():
+def reset_all_note_embedding_flags():
     """
-    Connects to the notes database and prints the contents of the 'notes' table,
-    focusing on the has_embedding flag.
+    Resets the 'has_embedding' flag for all notes to FALSE and clears the job queue.
+    This forces re-embedding for all notes, which is necessary if the 
+    embedding database (ChromaDB) is not persistent across sessions.
     """
     db_path = Path("notes") / "metadata" / "notes_database.db"
-    
     if not db_path.exists():
-        print(f"Database file not found at: {db_path}")
-        print("Please make sure you have run the application at least once to create the database.")
         return
 
-    print(f"Connecting to database at: {db_path}")
     conn = sqlite3.connect(str(db_path))
-    
+    cursor = conn.cursor()
+
     try:
-        # Use pandas to easily display the table in a readable format
-        # This will read the entire 'notes' table into a DataFrame
-        df = pd.read_sql_query("SELECT id, title, has_embedding, note_type FROM notes", conn)
+        # Set has_embedding to FALSE for all notes
+        cursor.execute("UPDATE notes SET has_embedding = FALSE")
+        updated_rows = cursor.rowcount
         
-        print("\n--- Contents of the 'notes' table ---")
-        if df.empty:
-            print("The 'notes' table is empty.")
-        else:
-            # Print the DataFrame to the console
-            print(df.to_string())
-            
-    except Exception as e:
-        print(f"\nAn error occurred while reading the database: {e}")
-        print("This might happen if the 'notes' table or columns don't exist yet.")
+        # Clear out the old embedding jobs queue to start fresh
+        cursor.execute("DELETE FROM embedding_jobs")
+        
+        conn.commit()
+        
+        st.info(f"🔄 Reset embedding status for {updated_rows} notes. They are now queued for re-embedding.")
+
+    except sqlite3.OperationalError as e:
+        st.warning(f"Could not reset embedding flags (database might be old or tables missing): {e}")
     finally:
         conn.close()
-        print("\nDatabase connection closed.")
 
 
 # Function to run the initial sync from Google Drive
@@ -142,14 +137,11 @@ def initial_sync():
         
         # Sync the pre-computed product embeddings
         gds.sync_directory_from_drive(drive, "product_embeddings_v2")
-
-        inspect_database()
-
+        
         return drive
     except Exception as e:
         st.error(f"Fatal Error: Could not sync with Google Drive. Please check credentials. Details: {e}")
         return None
-# <<< END SOLUTION MODIFICATION >>>
 
 # Perform the initial sync when the app starts
 if not st.session_state.drive_synced:
@@ -158,6 +150,12 @@ if not st.session_state.drive_synced:
         st.session_state.drive_synced = True
         st.session_state.drive_instance = drive
         st.sidebar.success("✅ Synced with Google Drive!")
+        
+        # Reset all embedding flags to force re-generation on every startup
+        reset_all_note_embedding_flags()
+        # Queue all notes for embedding
+        queue_synced_notes_for_embedding()
+
         # Rerun to ensure the rest of the app loads with the synced data
         st.rerun() 
     else:
@@ -870,7 +868,7 @@ def generate_note_embeddings_batch_with_progress(note_ids: List[int], embedding_
     for idx, note_id in enumerate(note_ids):
         try:
             # Update progress
-            progress_percent = int((idx / len(note_ids)) * 100)
+            progress_percent = int(((idx + 1) / len(note_ids)) * 100)
             progress_bar.progress(progress_percent, text=f"Processing note {idx+1}/{len(note_ids)}...")
             status_text.text(f"📝 Processing note ID: {note_id}")
             
@@ -880,6 +878,7 @@ def generate_note_embeddings_batch_with_progress(note_ids: List[int], embedding_
                 SET status = 'processing', started_at = CURRENT_TIMESTAMP
                 WHERE note_id = ? AND status = 'pending'
             """, (note_id,))
+            conn.commit()
             
             # Get note content
             try:
@@ -914,7 +913,7 @@ def generate_note_embeddings_batch_with_progress(note_ids: List[int], embedding_
             embedding_list = embedding.tolist()
             
             # Create unique ID for ChromaDB
-            chroma_id = f"note_{note_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            chroma_id = f"note_{note_id}"
             
             status_text.text(f"💾 Saving to database: {title[:30]}...")
             
@@ -957,6 +956,7 @@ def generate_note_embeddings_batch_with_progress(note_ids: List[int], embedding_
             except sqlite3.OperationalError:
                 pass  # Tables don't exist yet
             
+            conn.commit()
             successful_count += 1
             
         except Exception as e:
@@ -973,48 +973,44 @@ def generate_note_embeddings_batch_with_progress(note_ids: List[int], embedding_
                     SET processing_status = 'failed', error_message = ?
                     WHERE file_path = (SELECT content_path FROM notes WHERE id = ?)
                 """, (str(e), note_id))
+                conn.commit()
             except sqlite3.OperationalError:
                 pass
             
             status_text.text(f"❌ Error processing note {note_id}: {str(e)}")
     
     # Complete progress
-    progress_bar.progress(100, text="✅ Embedding generation completed!")
-    status_text.text(f"🎉 Successfully processed {successful_count}/{len(note_ids)} notes")
+    progress_bar.empty()
+    status_text.empty()
     
-    conn.commit()
     conn.close()
     
     return successful_count
 
-# <<< START SOLUTION MODIFICATION >>>
 def process_embedding_queue():
     """Process ALL pending embedding jobs with progress display"""
     db_path = Path("notes") / "metadata" / "notes_database.db"
     if not Path(db_path).exists():
         return 0
     
-    # Use the global embedding_model
     global embedding_model
     if not embedding_model:
         embedding_model = get_global_embedding_model()
     
     conn = sqlite3.connect(str(db_path))
     
-    # Get ALL pending jobs by removing the LIMIT clause
     try:
         pending_jobs = conn.execute("""
             SELECT note_id FROM embedding_jobs 
             WHERE status = 'pending' 
             ORDER BY created_at ASC
-        """).fetchall() # <-- LIMIT REMOVED
+        """).fetchall()
     except sqlite3.OperationalError:
-        # Fallback for missing columns
         pending_jobs = conn.execute("""
             SELECT id FROM notes 
             WHERE has_embedding = FALSE 
             ORDER BY timestamp DESC
-        """).fetchall() # <-- LIMIT REMOVED
+        """).fetchall()
     
     conn.close()
     
@@ -1023,7 +1019,6 @@ def process_embedding_queue():
     
     note_ids = [job[0] for job in pending_jobs]
     
-    # Get embedding dimension
     if embedding_model:
         test_emb = embedding_model.encode("test")
         embedding_dim = len(test_emb)
@@ -1037,7 +1032,6 @@ def process_embedding_queue():
         embedding_dim = model_dimensions.get(embedding_model_name, 384)
     
     return generate_note_embeddings_batch_with_progress(note_ids, embedding_model, embedding_dim)
-# <<< END SOLUTION MODIFICATION >>>
 
 # ================================
 # PHASE 3+: UNIFIED SEARCH SYSTEM
@@ -1048,18 +1042,14 @@ def unified_search(query_text, embedding_model_instance, n_results=10, include_n
     if not embedding_model_instance:
         return {"products": [], "notes": [], "error": "Embedding model not available"}
     
-    # Generate query embedding
     try:
         query_embedding = embedding_model_instance.encode(query_text, normalize_embeddings=True).tolist()
     except Exception as e:
         return {"products": [], "notes": [], "error": f"Failed to generate embedding: {e}"}
     
     results = {"products": [], "notes": [], "combined": []}
-    
-    # Get embedding dimension
     embedding_dim = len(query_embedding)
     
-    # Search products collection
     try:
         products_collection = get_local_chroma_collection(embedding_dim)
         product_results = products_collection.query(
@@ -1071,7 +1061,6 @@ def unified_search(query_text, embedding_model_instance, n_results=10, include_n
     except Exception as e:
         results["products"] = {"error": str(e)}
     
-    # Search notes collection if enabled
     if include_notes:
         try:
             notes_collection = get_notes_chroma_collection(embedding_dim)
@@ -1089,10 +1078,8 @@ def unified_search(query_text, embedding_model_instance, n_results=10, include_n
         except Exception as e:
             results["notes"] = {"error": str(e)}
     
-    # Combine and rank results
     combined_results = []
     
-    # Add product results
     if results["products"].get("documents") and results["products"]["documents"][0]:
         for i, (doc, meta, dist) in enumerate(zip(
             results["products"]["documents"][0],
@@ -1107,14 +1094,12 @@ def unified_search(query_text, embedding_model_instance, n_results=10, include_n
                 "relevance_score": 1.0 - dist
             })
     
-    # Add note results with weighting
     if results["notes"].get("documents") and results["notes"]["documents"][0]:
         for i, (doc, meta, dist) in enumerate(zip(
             results["notes"]["documents"][0],
             results["notes"]["metadatas"][0],
             results["notes"]["distances"][0]
         )):
-            # Apply note context weight
             weighted_relevance = (1.0 - dist) * note_context_weight
             combined_results.append({
                 "content": doc,
@@ -1124,7 +1109,6 @@ def unified_search(query_text, embedding_model_instance, n_results=10, include_n
                 "relevance_score": weighted_relevance
             })
     
-    # Sort by relevance score
     combined_results.sort(key=lambda x: x["relevance_score"], reverse=True)
     results["combined"] = combined_results[:n_results * 2]
     
@@ -1139,7 +1123,6 @@ notes_db_path = init_advanced_notes_database()
 
 st.sidebar.header("📝 Advanced Notes (Phase 3+)")
 
-# Enhanced note statistics
 stats = get_advanced_notes_stats()
 col1, col2 = st.sidebar.columns(2)
 with col1:
@@ -1149,7 +1132,6 @@ with col2:
     st.metric("Need Embedding", stats["needs_embedding"])
     st.metric("Pending Jobs", stats.get("pending_jobs", 0))
 
-# Enhanced embedding status display
 if stats.get("pending_jobs", 0) > 0 or stats.get("processing_jobs", 0) > 0:
     with st.sidebar.container():
         if stats.get("processing_jobs", 0) > 0:
@@ -1157,25 +1139,22 @@ if stats.get("pending_jobs", 0) > 0 or stats.get("processing_jobs", 0) > 0:
         if stats.get("pending_jobs", 0) > 0:
             st.warning(f"⏳ {stats['pending_jobs']} jobs pending...")
         
-        # Enhanced embedding progress display
         if stats.get("failed_jobs", 0) > 0:
             st.error(f"❌ {stats['failed_jobs']} jobs failed")
         if stats.get("completed_jobs", 0) > 0:
             st.success(f"✅ {stats['completed_jobs']} jobs completed")
 
-# Enhanced embedding queue management with visual progress
 if stats.get("pending_jobs", 0) > 0:
-    if st.sidebar.button("🚀 Process Embedding Queue (with Progress)"):
+    if st.sidebar.button("🚀 Process Embedding Queue"):
         with st.sidebar:
             processed = process_embedding_queue()
             if processed > 0:
                 st.success(f"✅ Processed {processed} embeddings!")
-                time.sleep(2)  # Show success message
+                time.sleep(2)
                 st.rerun()
             else:
                 st.info("No jobs to process")
 
-# Enhanced note creation
 with st.sidebar.expander("✨ Create Advanced Note", expanded=False):
     note_type = st.selectbox(
         "Category:",
@@ -1202,14 +1181,12 @@ with st.sidebar.expander("✨ Create Advanced Note", expanded=False):
         else:
             st.warning("Please fill in title and content")
 
-# PHASE 3+: Note Management Interface
 with st.sidebar.expander("🗂️ Manage All Notes", expanded=False):
     if st.button("📋 Show All Notes Manager"):
         st.session_state.show_note_manager = True
         st.rerun()
     
     if st.button("🔄 Generate All Missing Embeddings"):
-        # Process all pending jobs with progress
         total_processed = 0
         while True:
             processed = process_embedding_queue()
@@ -1223,7 +1200,6 @@ with st.sidebar.expander("🗂️ Manage All Notes", expanded=False):
             st.info("All notes already have embeddings")
         st.rerun()
 
-# Recent notes display
 if stats["total_notes"] > 0:
     st.sidebar.subheader("📋 Recent Notes")
     recent = get_recent_notes(3)
@@ -1235,7 +1211,6 @@ if stats["total_notes"] > 0:
             st.write(f"**Created:** {note['timestamp'][:19]}")
             st.write(f"**Embedding:** {embed_status}")
 
-# Add benefits info
 st.sidebar.info("""
 💰 **Phase 3+ Benefits:**
 - ✅ Zero API costs
@@ -1253,7 +1228,6 @@ st.sidebar.info("""
 # PHASE 3+: COMPREHENSIVE NOTE MANAGER
 # ================================
 
-# Initialize session state
 if 'show_note_manager' not in st.session_state:
     st.session_state.show_note_manager = False
 
@@ -1261,12 +1235,10 @@ if st.session_state.show_note_manager:
     st.write("---")
     st.header("🗂️ Comprehensive Note Manager with Embedding Status")
     
-    # Close button
     if st.button("❌ Close Note Manager"):
         st.session_state.show_note_manager = False
         st.rerun()
     
-    # Get all notes
     all_notes = get_all_notes_with_details()
     
     if not all_notes:
@@ -1274,7 +1246,6 @@ if st.session_state.show_note_manager:
     else:
         st.write(f"**Managing {len(all_notes)} notes**")
         
-        # Enhanced filters with embedding status
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             filter_type = st.selectbox(
@@ -1298,7 +1269,6 @@ if st.session_state.show_note_manager:
                 ["Recent First", "Oldest First", "Title A-Z", "Title Z-A"]
             )
         
-        # Apply filters
         filtered_notes = all_notes
         
         if filter_type != "All Types":
@@ -1312,7 +1282,6 @@ if st.session_state.show_note_manager:
         if search_notes:
             filtered_notes = [n for n in filtered_notes if search_notes.lower() in n["title"].lower()]
         
-        # Apply sorting
         if sort_by == "Recent First":
             filtered_notes.sort(key=lambda x: x["timestamp"], reverse=True)
         elif sort_by == "Oldest First":
@@ -1324,19 +1293,12 @@ if st.session_state.show_note_manager:
         
         st.write(f"**Showing {len(filtered_notes)} notes**")
         
-        # Enhanced display with embedding status
         for note in filtered_notes:
             emoji = NOTE_CATEGORIES[note["type"]]["emoji"]
-            embed_status = "✅" if note["has_embedding"] else "⏳"
             file_size_kb = (note["file_size"] or 0) / 1024
             
-            # Enhanced status indicator
-            if note["has_embedding"]:
-                status_color = "🟢"
-                status_text = "Ready"
-            else:
-                status_color = "🟡"
-                status_text = "Pending"
+            status_color = "🟢" if note["has_embedding"] else "🟡"
+            status_text = "Ready" if note["has_embedding"] else "Pending"
             
             with st.expander(f"{emoji} {note['title']} - {status_color} {status_text} ({file_size_kb:.1f} KB)"):
                 col1, col2 = st.columns([3, 1])
@@ -1354,18 +1316,15 @@ if st.session_state.show_note_manager:
                     if note['links']:
                         st.write(f"**Links:** {note['links']}")
                     
-                    # View content
                     if st.button("👁️ View Content", key=f"view_{note['id']}"):
                         note_content = get_note_content(note['id'])
                         if note_content:
                             st.text_area("Content:", note_content['content'], height=200, key=f"content_view_{note['id']}")
                     
-                    # Edit note
                     if st.button("✏️ Edit Note", key=f"edit_{note['id']}"):
                         st.session_state[f"editing_{note['id']}"] = True
                         st.rerun()
                     
-                    # Edit form
                     if st.session_state.get(f"editing_{note['id']}", False):
                         note_content = get_note_content(note['id'])
                         if note_content:
@@ -1389,11 +1348,8 @@ if st.session_state.show_note_manager:
                                     st.rerun()
                 
                 with col2:
-                    # Enhanced action buttons
                     if not note['has_embedding']:
                         if st.button("🚀 Generate Embedding", key=f"embed_{note['id']}"):
-                            # Process single note embedding with progress
-                            # Calculate embedding dimension
                             if embedding_model:
                                 test_emb = embedding_model.encode("test")
                                 embedding_dim = len(test_emb)
@@ -1436,12 +1392,10 @@ if st.session_state.show_note_manager:
 # Conversation management, Puter.js integration, search UI, etc.
 # ================================
 
-# Initialize conversation history in session state
 if 'conversation_history' not in st.session_state:
     st.session_state.conversation_history = []
 
 def add_to_conversation(role, content):
-    """Add message to conversation history"""
     if enable_context:
         st.session_state.conversation_history.append({
             "role": role,
@@ -1453,7 +1407,6 @@ def add_to_conversation(role, content):
             st.session_state.conversation_history = st.session_state.conversation_history[-max_context_messages * 2:]
 
 def build_context_prompt(user_query, document_context, note_context=""):
-    """Build prompt with conversation context and note context"""
     if not enable_context or not st.session_state.conversation_history:
         base_prompt = f"User Query: {user_query}\n\nContext: {document_context}"
     else:
@@ -1469,7 +1422,6 @@ Current Query: {user_query}
 
 Document Context: {document_context}"""
     
-    # Add note context if available
     if note_context and enable_unified_search:
         base_prompt += f"\n\nPersonal Notes Context: {note_context}"
         base_prompt += "\n\nPlease respond considering both the document context and the user's personal notes above."
@@ -1479,7 +1431,6 @@ Document Context: {document_context}"""
     return base_prompt
 
 def clear_conversation_history():
-    """Clear conversation history"""
     st.session_state.conversation_history = []
     st.success("🧹 Conversation history cleared!")
 
@@ -1488,7 +1439,6 @@ def clear_conversation_history():
 # ================================
 
 def ingest_local_embeddings(collection, embeddings_folder="product_embeddings_v2"):
-    """Ingest embeddings from your embedding script format"""
     if not os.path.exists(embeddings_folder):
         st.warning(f"Embeddings folder '{embeddings_folder}' not found.")
         return
@@ -1547,11 +1497,10 @@ def ingest_local_embeddings(collection, embeddings_folder="product_embeddings_v2
     st.success(f"✅ Ingested {total_docs} documents from local embeddings!")
 
 # ================================
-# ENHANCED PUTER.JS COMPONENT (keeping your original)
+# ENHANCED PUTER.JS COMPONENT
 # ================================
 
 def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
-    """ENHANCED: Puter.js component with streaming and context awareness"""
     escaped_prompt = prompt.replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
     unique_id = int(time.time() * 1000) % 1000000
     
@@ -1567,552 +1516,160 @@ def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
         <script src="https://js.puter.com/v2/"></script>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
-            body {{
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                margin: 15px;
-                background: #f8f9fa;
-                min-height: 600px;
-            }}
-            .container {{
-                background: white;
-                padding: 20px;
-                border-radius: 15px;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-                min-height: 550px;
-                border: 1px solid #e0e0e0;
-            }}
-            .model-info {{
-                background: linear-gradient(135deg, #e3f2fd, #f3e5f5);
-                padding: 15px;
-                border-radius: 10px;
-                margin-bottom: 20px;
-                border-left: 4px solid #2196f3;
-                font-size: 0.95em;
-            }}
-            .streaming-indicator {{
-                background: #e8f5e8;
-                border: 1px solid #4caf50;
-                padding: 10px;
-                border-radius: 8px;
-                margin-bottom: 15px;
-                display: {'block' if stream else 'none'};
-            }}
-            .context-indicator {{
-                background: #fff3e0;
-                border: 1px solid #ff9800;
-                padding: 10px;
-                border-radius: 8px;
-                margin-bottom: 15px;
-                font-size: 0.9em;
-            }}
-            .loading {{
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                color: #666;
-                padding: 15px;
-            }}
-            .spinner {{
-                border: 3px solid #f3f3f3;
-                border-top: 3px solid #667eea;
-                border-radius: 50%;
-                width: 20px;
-                height: 20px;
-                animation: spin 1s linear infinite;
-            }}
-            @keyframes spin {{
-                0% {{ transform: rotate(0deg); }}
-                100% {{ transform: rotate(360deg); }}
-            }}
-            .result {{
-                white-space: pre-wrap;
-                line-height: 1.6;
-                color: #333;
-                max-height: 400px;
-                overflow-y: auto;
-                padding: 15px;
-                background: #fafafa;
-                border-radius: 8px;
-                border: 1px solid #e0e0e0;
-                font-family: inherit;
-            }}
-            .streaming-text {{
-                white-space: pre-wrap;
-                line-height: 1.6;
-                color: #333;
-                max-height: 400px;
-                overflow-y: auto;
-                padding: 15px;
-                background: #fafafa;
-                border-radius: 8px;
-                border: 1px solid #e0e0e0;
-                font-family: inherit;
-                min-height: 100px;
-            }}
-            .error {{
-                color: #dc3545;
-                background: #f8d7da;
-                padding: 15px;
-                border-radius: 8px;
-                border: 1px solid #f5c6cb;
-                margin: 10px 0;
-            }}
-            .warning {{
-                background: #fff3cd;
-                border: 1px solid #ffeaa7;
-                color: #856404;
-                padding: 15px;
-                border-radius: 8px;
-                margin: 10px 0;
-            }}
-            .success {{
-                background: #d4edda;
-                border: 1px solid #c3e6cb;
-                color: #155724;
-                padding: 15px;
-                border-radius: 8px;
-                margin: 10px 0;
-            }}
-            .streaming-cursor {{
-                animation: blink 1s infinite;
-                font-weight: bold;
-                color: #667eea;
-            }}
-            @keyframes blink {{
-                0%, 50% {{ opacity: 1; }}
-                51%, 100% {{ opacity: 0; }}
-            }}
-            .stats {{
-                margin-top: 15px;
-                font-size: 0.9em;
-                color: #666;
-                border-top: 1px solid #eee;
-                padding-top: 10px;
-                display: flex;
-                justify-content: space-between;
-                flex-wrap: wrap;
-                gap: 10px;
-            }}
+            body {{ font-family: 'Segoe UI', sans-serif; margin: 15px; background: #f8f9fa; min-height: 600px; }}
+            .container {{ background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); min-height: 550px; border: 1px solid #e0e0e0; }}
+            .model-info {{ background: linear-gradient(135deg, #e3f2fd, #f3e5f5); padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #2196f3; font-size: 0.95em; }}
+            .loading {{ display: flex; align-items: center; gap: 10px; color: #666; padding: 15px; }}
+            .spinner {{ border: 3px solid #f3f3f3; border-top: 3px solid #667eea; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }}
+            @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
+            .streaming-text {{ white-space: pre-wrap; line-height: 1.6; color: #333; max-height: 400px; overflow-y: auto; padding: 15px; background: #fafafa; border-radius: 8px; border: 1px solid #e0e0e0; font-family: inherit; min-height: 100px; }}
+            .warning {{ background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 15px; border-radius: 8px; margin: 10px 0; }}
+            .streaming-cursor {{ animation: blink 1s infinite; font-weight: bold; color: #667eea; }}
+            @keyframes blink {{ 0%, 50% {{ opacity: 1; }} 51%, 100% {{ opacity: 0; }} }}
+            .stats {{ margin-top: 15px; font-size: 0.9em; color: #666; border-top: 1px solid #eee; padding-top: 10px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; }}
         </style>
     </head>
     <body>
         <div class="container" id="container_{unique_id}">
-            <div class="model-info">
-                <strong>🤖 Model:</strong> {model} | 
-                <strong>⚡ Provider:</strong> Puter.js (Free) | 
-                <strong>📊 Embeddings:</strong> Local |
-                <strong>🔄 Streaming:</strong> {'Enabled' if stream else 'Disabled'}
-            </div>
-            
-            <div class="streaming-indicator">
-                <strong>🌊 Streaming Mode:</strong> Responses will appear in real-time
-            </div>
-            
-            <div class="context-indicator">
-                <strong>🧠 Phase 3+ Enhanced:</strong> AI with unified search and complete note management
-            </div>
-            
-            <div id="result_{unique_id}">
-                <div class="loading">
-                    <div class="spinner"></div>
-                    <span>{'Streaming' if stream else 'Processing'} with {model}...</span>
-                </div>
-            </div>
+            <div class="model-info"><strong>🤖 Model:</strong> {model} | <strong>⚡ Provider:</strong> Puter.js (Free) | <strong>📊 Embeddings:</strong> Local | <strong>🔄 Streaming:</strong> {'Enabled' if stream else 'Disabled'}</div>
+            <div id="result_{unique_id}"><div class="loading"><div class="spinner"></div><span>{'Streaming' if stream else 'Processing'} with {model}...</span></div></div>
         </div>
-        
         <script>
             async function processQuery_{unique_id}() {{
                 const resultDiv = document.getElementById('result_{unique_id}');
                 const fallbacks = {json.dumps(fallback_models.get(model, []))};
-                
                 async function tryStreamingModel(modelName, isRetry = false) {{
                     try {{
-                        if (isRetry) {{
-                            resultDiv.innerHTML = `
-                                <div class="warning">
-                                    <strong>🔄 Retrying with ${{modelName}}</strong><br>
-                                    Primary model had issues. Trying fallback option...
-                                </div>
-                            `;
-                        }}
-                        
+                        if (isRetry) {{ resultDiv.innerHTML = `<div class="warning"><strong>🔄 Retrying with ${{modelName}}</strong><br>Primary model had issues.</div>`; }}
                         const startTime = Date.now();
                         const streamingEnabled = {str(stream).lower()};
-                        
                         if (streamingEnabled) {{
-                            resultDiv.innerHTML = `
-                                <div class="streaming-text" id="streamingContent_{unique_id}"></div>
-                                <div class="stats" id="stats_{unique_id}">
-                                    <span>⏱ Streaming started...</span>
-                                    <span>📝 Model: ${{modelName}}</span>
-                                </div>
-                            `;
-                            
+                            resultDiv.innerHTML = `<div class="streaming-text" id="streamingContent_{unique_id}"></div><div class="stats" id="stats_{unique_id}"></div>`;
                             const streamingContent = document.getElementById('streamingContent_{unique_id}');
                             const stats = document.getElementById('stats_{unique_id}');
-                            
-                            const response = await puter.ai.chat("{escaped_prompt}", {{
-                                model: modelName,
-                                stream: true,
-                                max_tokens: 2000
-                            }});
-                            
-                            let fullResponse = '';
-                            let chunkCount = 0;
-                            
+                            const response = await puter.ai.chat("{escaped_prompt}", {{ model: modelName, stream: true, max_tokens: 2000 }});
+                            let fullResponse = ''; let chunkCount = 0;
                             for await (const chunk of response) {{
                                 chunkCount++;
                                 const content = chunk?.text || chunk?.content || '';
-                                
                                 if (content) {{
                                     fullResponse += content;
                                     streamingContent.innerHTML = fullResponse + '<span class="streaming-cursor">▋</span>';
                                     streamingContent.scrollTop = streamingContent.scrollHeight;
-                                    
-                                    const currentTime = Date.now();
-                                    const elapsed = ((currentTime - startTime) / 1000).toFixed(1);
-                                    stats.innerHTML = `
-                                        <span>⏱ Time: ${{elapsed}}s</span>
-                                        <span>📦 Chunks: ${{chunkCount}}</span>
-                                        <span>📝 Model: ${{modelName}}</span>
-                                        <span>🔄 Streaming...</span>
-                                    `;
+                                    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                                    stats.innerHTML = `<span>⏱ Time: ${{elapsed}}s</span><span>📦 Chunks: ${{chunkCount}}</span><span>📝 Model: ${{modelName}}</span>`;
                                 }}
                             }}
-                            
                             streamingContent.innerHTML = fullResponse;
-                            const endTime = Date.now();
-                            const totalTime = ((endTime - startTime) / 1000).toFixed(2);
-                            
-                            stats.innerHTML = `
-                                <span>⏱ Completed in: ${{totalTime}}s</span>
-                                <span>📦 Total chunks: ${{chunkCount}}</span>
-                                <span>📝 Model: ${{modelName}}</span>
-                                <span>✅ Stream complete</span>
-                            `;
+                            const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                            stats.innerHTML = `<span>⏱ Completed in: ${{totalTime}}s</span><span>📦 Total chunks: ${{chunkCount}}</span><span>📝 Model: ${{modelName}}</span>`;
                         }} else {{
-                            const response = await puter.ai.chat("{escaped_prompt}", {{
-                                model: modelName,
-                                stream: false,
-                                max_tokens: 2000
-                            }});
-                            
-                            const endTime = Date.now();
-                            const processingTime = ((endTime - startTime) / 1000).toFixed(2);
-                            
-                            resultDiv.innerHTML = `
-                                <div class="result">${{response}}</div>
-                                <div class="stats">
-                                    <span>⏱ Processing time: ${{processingTime}}s</span>
-                                    <span>📝 Model: ${{modelName}}</span>
-                                    <span>📊 Non-streaming mode</span>
-                                </div>
-                            `;
+                            const response = await puter.ai.chat("{escaped_prompt}", {{ model: modelName, stream: false, max_tokens: 2000 }});
+                            const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                            resultDiv.innerHTML = `<div class="streaming-text">${{response}}</div><div class="stats"><span>⏱ Completed in: ${{totalTime}}s</span><span>📝 Model: ${{modelName}}</span></div>`;
                         }}
-                        
                         return true;
-                        
                     }} catch (error) {{
                         console.error(`Error with ${{modelName}}:`, error);
-                        
-                        if (error.message.includes('no fallback model available')) {{
-                            resultDiv.innerHTML = `
-                                <div class="warning">
-                                    <strong>⚠️ Model Temporarily Unavailable</strong><br>
-                                    The ${{modelName}} model is experiencing issues. Trying alternative models...
-                                </div>
-                            `;
-                        }} else if (error.message.includes('credits') || error.message.includes('tokens')) {{
-                            resultDiv.innerHTML = `
-                                <div class="warning">
-                                    <strong>⚠️ Usage Limit Reached</strong><br>
-                                    ${{modelName}} has reached its usage limit. Switching to alternative model...
-                                </div>
-                            `;
-                        }}
-                        
                         return false;
                     }}
                 }}
-                
-                const success = await tryStreamingModel("{model}");
-                
-                if (!success && fallbacks.length > 0) {{
+                if (!await tryStreamingModel("{model}")) {{
                     for (const fallback of fallbacks) {{
-                        const fallbackSuccess = await tryStreamingModel(fallback, true);
-                        if (fallbackSuccess) break;
-                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        if (await tryStreamingModel(fallback, true)) break;
                     }}
                 }}
             }}
-            
             processQuery_{unique_id}();
         </script>
     </body>
     </html>
     """
-    
     return components.html(puter_html, height=650)
 
 def get_structured_output_from_puter_enhanced(concatenated_text, user_query, model="gpt-4o-mini", note_context=""):
-    """ENHANCED: Puter.js processing with context awareness and notes"""
     context_prompt = build_context_prompt(user_query, concatenated_text, note_context)
-    
-    full_prompt = f"""You are a helpful AI assistant specializing in analog devices and electronic components. 
-You have access to both technical documentation and the user's personal notes.
-Provide accurate, technical information based on the provided context.
-
-{context_prompt}
-
-Please provide a comprehensive, well-structured response that directly addresses the query."""
-    
-    st.write("### 🤖 AI Processing with Puter.js (Phase 3+ Enhanced)")
-    
-    # Show context status
+    full_prompt = f"You are a helpful AI assistant. Provide accurate information based on the provided context.\n\n{context_prompt}\n\nPlease provide a comprehensive, well-structured response."
+    st.write("### 🤖 AI Processing with Puter.js")
     if enable_context and st.session_state.conversation_history:
-        st.info(f"🧠 **Context Active**: Remembering {len(st.session_state.conversation_history)} previous messages")
-    
+        st.info(f"🧠 Context Active: Remembering {len(st.session_state.conversation_history)} messages")
     if note_context and enable_unified_search:
-        st.info(f"📝 **Note Context**: Including relevant personal notes in response")
-    
+        st.info("📝 Note Context: Including relevant personal notes")
     create_streaming_puter_component(full_prompt, model, enable_streaming)
     add_to_conversation("user", user_query)
-    
-    return "Enhanced response with streaming, context, and notes displayed above"
+    return "Response displayed above"
 
 # ================================
 # UTILITY FUNCTIONS
 # ================================
 
 def extract_and_display_unified_results(unified_results):
-    """Extract and display unified search results (products + notes)"""
     if not unified_results.get("combined"):
         st.write("No results found.")
         return
-    
     st.write("### 📄 Unified Search Results (Products + Notes)")
-    
     for idx, result in enumerate(unified_results["combined"], start=1):
         source_emoji = "🏭" if result["source"] == "product" else "📝"
         source_text = "Product" if result["source"] == "product" else "Personal Note"
         relevance = result["relevance_score"]
-        
         with st.expander(f"{source_emoji} Result {idx}: {source_text} (Relevance: {relevance:.2f})"):
             st.write(f"**Content:** {result['content'][:500]}...")
             st.write(f"**Source:** {source_text}")
             st.write(f"**Relevance Score:** {relevance:.3f}")
-            
             if result["source"] == "product":
-                product = result["metadata"].get("product", "Unknown")
-                chunk_index = result["metadata"].get("chunk_index", "Unknown")
-                links = result["metadata"].get("links", "No links provided")
-                st.write(f"**Product:** {product}")
-                st.write(f"**Chunk Index:** {chunk_index}")
-                st.write(f"**Links:** {links}")
+                st.write(f"**Product:** {result['metadata'].get('product', 'Unknown')}")
+                st.write(f"**Links:** {result['metadata'].get('links', 'No links')}")
             else:
-                title = result["metadata"].get("title", "Unknown")
-                note_type = result["metadata"].get("note_type", "Unknown")
-                tags = result["metadata"].get("tags", "")
-                st.write(f"**Note Title:** {title}")
-                st.write(f"**Note Type:** {note_type}")
-                if tags:
-                    st.write(f"**Tags:** {tags}")
-
-def extract_and_display_documents(query_results):
-    """Extract and display source documents"""
-    documents_nested = query_results.get("documents")
-    metadatas_nested = query_results.get("metadatas")
-    
-    if not documents_nested:
-        st.write("No documents found in the query results.")
-        return
-    
-    documents = documents_nested[0] if documents_nested else []
-    metadatas = metadatas_nested[0] if metadatas_nested and isinstance(metadatas_nested, list) and len(metadatas_nested) > 0 else []
-    
-    st.write("### 📄 Source Documents")
-    for idx, doc in enumerate(documents, start=1):
-        metadata = metadatas[idx-1] if idx-1 < len(metadatas) else {}
-        product = metadata.get("product", "Unknown")
-        chunk_index = metadata.get("chunk_index", "Unknown")
-        links = metadata.get("links", "No links provided")
-        
-        with st.expander(f"Document {idx}: {product} - Chunk {chunk_index}"):
-            st.write(f"**Content:** {doc}")
-            st.write(f"**Product:** {product}")
-            st.write(f"**Chunk Index:** {chunk_index}")
-            st.write(f"**Links:** {links}")
+                st.write(f"**Note Title:** {result['metadata'].get('title', 'Unknown')}")
 
 # ================================
-# MAIN SEARCH UI WITH PHASE 3+ ENHANCEMENTS
+# MAIN SEARCH UI
 # ================================
 
 st.write("---")
-st.header("🔍 Phase 3+: Unified Search with Visual Progress Tracking")
-
-# Context Management Controls
-col1, col2, col3 = st.columns(3)
-with col1:
-    if st.button("🧹 Clear Context History"):
-        clear_conversation_history()
-
-with col2:
-    if st.button("📋 View Context History"):
-        if st.session_state.conversation_history:
-            st.json(st.session_state.conversation_history)
-        else:
-            st.info("No conversation history yet")
-
-with col3:
-    st.write(f"**Context Messages:** {len(st.session_state.conversation_history)}")
+st.header("🔍 Unified Search")
 
 query_text = st.text_input(
     "Enter your search query:", 
-    placeholder="e.g., Wideband Low Noise Amplifier datasheet or my notes about amplifiers",
-    help="Search with streaming responses, conversation memory, and personal notes"
+    placeholder="e.g., Wideband Low Noise Amplifier datasheet or my notes about amplifiers"
 )
 
-# Get embedding dimension
 if embedding_model:
-    test_emb = embedding_model.encode("test")
-    embedding_dim = len(test_emb)
+    embedding_dim = len(embedding_model.encode("test"))
 else:
-    model_dimensions = {
-        "BAAI/bge-small-en-v1.5": 384,
-        "all-mpnet-base-v2": 768,
-        "paraphrase-multilingual-mpnet-base-v2": 768,
-        "all-MiniLM-L6-v2": 384
-    }
-    embedding_dim = model_dimensions.get(embedding_model_name, 384)
-
-# Display current configuration
-config_cols = st.columns(4)
-with config_cols[0]:
-    st.info(f"📊 **Model:** {embedding_model_name} ({embedding_dim}D)")
-with config_cols[1]:
-    st.info(f"🔄 **Streaming:** {'✅ Enabled' if enable_streaming else '❌ Disabled'}")
-with config_cols[2]:
-    st.info(f"🧠 **Context:** {'✅ Active' if enable_context else '❌ Disabled'}")
-with config_cols[3]:
-    st.info(f"🔗 **Unified Search:** {'✅ Active' if enable_unified_search else '❌ Disabled'}")
+    embedding_dim = 384
 
 collection = get_local_chroma_collection(embedding_dim)
 notes_collection = get_notes_chroma_collection(embedding_dim)
 
-# Display collection status
-col1, col2 = st.columns(2)
-with col1:
-    try:
-        doc_count = collection.count()
-        if doc_count == 0:
-            st.warning("⚠️ Products collection is empty.")
-        else:
-            st.success(f"✅ Products ready: {doc_count:,} documents")
-    except:
-        st.error("❌ Error accessing products collection")
-
-with col2:
-    try:
-        notes_count = notes_collection.count()
-        if notes_count == 0:
-            st.info("📝 No notes with embeddings yet")
-        else:
-            st.success(f"✅ Notes ready: {notes_count:,} documents")
-    except:
-        st.error("❌ Error accessing notes collection")
-
-# Data Management
-st.write("### 📥 Data Management")
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    if st.button("📂 Ingest Local Embeddings"):
-        with st.spinner("Ingesting local embeddings..."):
-            ingest_local_embeddings(collection)
-
-with col2:
-    if st.button("📊 Collection Stats"):
-        try:
-            count = collection.count()
-            st.write(f"Product documents: {count:,}")
-            notes_count = notes_collection.count()
-            st.write(f"Note documents: {notes_count:,}")
-            if count > 0:
-                sample = collection.get(limit=1, include=["metadatas"])
-                if sample["metadatas"]:
-                    st.write("Sample product metadata:")
-                    st.json(sample["metadatas"][0])
-        except Exception as e:
-            st.error(f"Error getting stats: {e}")
-
-with col3:
-    if st.button("🗑️ Clear Collections"):
-        if st.sidebar.button("⚠️ Confirm Clear Collections"):
-            try:
-                all_data = collection.get()
-                if all_data["ids"]:
-                    collection.delete(ids=all_data["ids"])
-                
-                notes_data = notes_collection.get()
-                if notes_data["ids"]:
-                    notes_collection.delete(ids=notes_data["ids"])
-                
-                st.success("Collections cleared!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error clearing collections: {e}")
-
-# PHASE 3+: Unified search with products and notes
-if st.button("🚀 Phase 3+ Unified Search (Products + Notes)", type="primary"):
+if st.button("🚀 Unified Search", type="primary"):
     if not query_text:
-        st.warning("Please enter a valid search query.")
+        st.warning("Please enter a query.")
     else:
-        with st.spinner("🔍 Performing unified search across products and notes..."):
-            try:
-                unified_results = unified_search(
-                    query_text, 
-                    embedding_model, 
-                    n_results=10, 
-                    include_notes=enable_unified_search
-                )
+        with st.spinner("🔍 Performing unified search..."):
+            unified_results = unified_search(
+                query_text, 
+                embedding_model, 
+                n_results=10, 
+                include_notes=enable_unified_search
+            )
+            
+            if unified_results.get("error"):
+                st.error(f"❌ Search error: {unified_results['error']}")
+            elif not unified_results.get("combined"):
+                st.warning("No relevant results found.")
+            else:
+                st.success("✅ Unified search completed!")
+                product_context = "\n\n".join([r['content'] for r in unified_results["combined"] if r['source'] == 'product'][:5])
+                note_context = "\n\n".join([r['content'] for r in unified_results["combined"] if r['source'] == 'note'][:5])
                 
-                if unified_results.get("error"):
-                    st.error(f"❌ Search error: {unified_results['error']}")
-                    st.stop()
-                
-                if not unified_results.get("combined"):
-                    st.warning("No relevant results found.")
-                    st.stop()
-                
-                st.success("✅ Unified search completed! Processing with Enhanced AI...")
-                
-                # Extract contexts for AI
-                product_context = ""
-                note_context = ""
-                
-                for result in unified_results["combined"][:5]:
-                    if result["source"] == "product":
-                        product_context += f"\n\n{result['content']}"
-                    else:
-                        note_context += f"\n\n{result['content']}"
-                
-                # Use enhanced Puter.js with unified context
                 get_structured_output_from_puter_enhanced(
                     product_context, 
                     query_text, 
                     model=selected_model,
                     note_context=note_context
                 )
-                
-                # Display unified results
                 extract_and_display_unified_results(unified_results)
-                
-            except Exception as e:
-                st.error(f"❌ Error during unified search: {e}")
-                st.write("**Troubleshooting Steps:**")
-                st.write("1. Ensure embedding model is loaded")
-                st.write("2. Check if collections have data")
-                st.write("3. Process embedding queue for notes")
 
 # ================================
 # ENHANCED FOOTER
@@ -2120,44 +1677,9 @@ if st.button("🚀 Phase 3+ Unified Search (Products + Notes)", type="primary"):
 
 st.write("---")
 st.markdown(f"""
-### 🎉 **Phase 3+ Complete - Ultimate AI Knowledge Management with Visual Progress!**
-
-**✅ Core Features:**
-- 📊 **Local Embeddings** - {embedding_model_name} ({embedding_dim}D)
-- 🤖 **Puter.js AI** - {selected_model} with advanced capabilities
-- 🚫 **Zero Dependencies** - No external API costs
-
-**🆕 Enhanced Features:**
-- 🌊 **Streaming Responses** - Real-time AI output ({'✅ Enabled' if enable_streaming else '❌ Disabled'})
-- 🧠 **Context Awareness** - Conversation memory ({'✅ Active' if enable_context else '❌ Disabled'})
-- 🔗 **Unified Search** - Products + Notes ({'✅ Active' if enable_unified_search else '❌ Disabled'})
-- 📝 **History Management** - {len(st.session_state.conversation_history)} messages in memory
-
-**📝 Phase 3+ Complete Note System:**
-- 📋 **Total Notes** - {stats["total_notes"]} notes created
-- ✅ **With Embeddings** - {stats["has_embedding"]} notes processed
-- ⏳ **Pending Jobs** - {stats.get("pending_jobs", 0)} embedding jobs queued
-- 🔄 **Background Processing** - Automatic embedding generation with progress bars
-- 🎯 **Smart Search** - Cross-reference between products and personal knowledge
-- 📊 **Advanced Analytics** - Comprehensive note statistics and insights
-- ✏️ **Full CRUD Operations** - Create, Read, Update, Delete all note types
-- 🗂️ **Complete Management** - View, edit, delete with embedding status tracking
-- 📈 **Visual Progress** - Real-time progress tracking for all operations
-- 🔍 **Enhanced Filtering** - Advanced search and sorting capabilities
-
-**🎯 System Status:**
-- 💰 **Cost:** $0 (Completely free)
-- 🔄 **Rate Limits:** None
-- 🛡️ **Privacy:** All data local
-- 🌐 **Connectivity:** Works offline
-- ⚡ **Performance:** Phase 3+ optimized with visual progress tracking
-- 🧠 **Intelligence:** AI learns from your personal notes
-- 🗂️ **Management:** Complete note lifecycle management with visual feedback
-
-*Your system is now the ultimate AI-powered knowledge management platform with complete note CRUD operations, visual progress tracking, embedding management, and unified search capabilities!*
-
-**🏆 Achievement Unlocked:** Ultimate professional-grade AI knowledge management system with complete visual progress tracking!
-
-**Background Embedding Status:** ✅ Working with real-time progress display and status tracking!
+### 🎉 **Phase 3+ Complete**
+- **Local Embeddings:** {embedding_model_name} ({embedding_dim}D)
+- **AI Model:** {selected_model}
+- **Notes:** {stats["total_notes"]} total, {stats.get("pending_jobs", 0)} pending embeddings.
 """)
 
