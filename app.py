@@ -1,6 +1,6 @@
 # app.py
 # --- Ensure a modern sqlite provider is used if available (must run before chromadb imports) ---
-import sys
+import sys, os
 try:
     import pysqlite3
     print("Using pysqlite3 as sqlite3 backend (injected at app.py).")
@@ -16,7 +16,8 @@ from pathlib import Path
 import time
 
 # ---- imports from your modules ----
-from google_drive_sync import authenticate_gdrive, sync_directory_from_drive
+import google_drive_sync as gds
+from google_drive_sync import sync_directory_from_drive  # convenience, but we use gds.authenticate_gdrive too
 from database import (
     init_advanced_notes_database,
     scan_and_queue_new_notes,
@@ -38,12 +39,51 @@ db_path = init_advanced_notes_database()
 def _get_collection():
     return get_notes_chroma_collection(collection_name=NOTES_COLLECTION_NAME, persist_directory=PERSIST_DIRECTORY)
 
-notes_collection = _get_collection()
+try:
+    notes_collection = _get_collection()
+except Exception as e:
+    # If chromadb fails to import / init, we still allow the app to run (search will fail gracefully)
+    notes_collection = None
+    st.warning(f"Chroma collection unavailable: {e}")
 
 # Cached model load (embeddings.py already caches, but this provides a local handle)
 EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 embedding_model = load_embedding_model(EMBEDDING_MODEL_NAME)
 
+
+# -----------------------------
+# Google Drive initial sync logic (from your backup, adapted safely)
+# -----------------------------
+if "drive_synced" not in st.session_state:
+    st.session_state.drive_synced = False
+if "drive_instance" not in st.session_state:
+    st.session_state.drive_instance = None
+
+@st.cache_resource(show_spinner="Connecting to Google Drive and syncing data...")
+def initial_sync():
+    """
+    Authenticates with Google Drive and downloads the 'notes' directory.
+    This runs only once per Streamlit run (cached). It will raise on failure.
+    """
+    try:
+        # Attempt to authenticate (gds.authenticate_gdrive may raise)
+        drive = gds.authenticate_gdrive()
+        # Sync the notes directory (contains SQLite DB and .txt files)
+        gds.sync_directory_from_drive(drive, "notes")
+        return drive
+    except Exception as e:
+        # bubble up error so caller can show a meaningful message
+        raise
+
+# Helper to check if we have credentials able to auto-auth
+def _have_drive_credentials_for_autosync() -> bool:
+    # Service account in st.secrets
+    if "gdrive_service_account_json" in st.secrets:
+        return True
+    # Local client_secrets.json file in app root (used by LocalWebserverAuth)
+    if os.path.exists("client_secrets.json"):
+        return True
+    return False
 
 # ---- Helper UI functions ----
 def display_notes_table(limit: int = 200):
@@ -56,11 +96,11 @@ def display_notes_table(limit: int = 200):
 
 
 def run_sync_and_scan(drive=None, parent_folder_id=None):
-    # If drive provided, sync; else just scan (useful for manual file drops)
+    # If drive provided, sync; else just call scan (useful for manual file drops)
     if drive is not None:
         st.info("Syncing from Google Drive...")
         try:
-            local_path = sync_directory_from_drive(drive)
+            local_path = gds.sync_directory_from_drive(drive)
             st.success(f"Drive sync extracted to: {local_path}")
         except Exception as e:
             st.error(f"Drive sync failed: {e}")
@@ -80,6 +120,9 @@ def run_process_embedding_queue(limit: int = 50):
     if embedding_model is None:
         st.error("Embedding model not loaded; cannot process embeddings.")
         return 0
+    if notes_collection is None:
+        st.error("Vector DB (Chroma) unavailable; cannot write embeddings.")
+        return 0
     st.info("Processing embedding queue (this may take some time)...")
     t0 = time.time()
     count = process_embedding_queue(embedding_model, EMBEDDING_MODEL_NAME, notes_collection, limit=limit)
@@ -97,13 +140,14 @@ def semantic_search(query: str, top_k: int = 5):
 
     qvec = embedding_model.encode([query], show_progress_bar=False, convert_to_numpy=True)[0]
     try:
-        # chroma collection query - ask for documents/metadatas/distances
+        if notes_collection is None:
+            st.error("Chroma collection not available for semantic search.")
+            return []
         results = notes_collection.query(
             embeddings=[qvec.tolist() if hasattr(qvec, "tolist") else qvec],
             n_results=top_k,
             include=["metadatas", "documents", "distances"],
         )
-        # results is a dict-like structure
         hits = []
         if results:
             docs = results.get("documents", [[]])[0]
@@ -124,14 +168,18 @@ left_col, right_col = st.columns([3, 1])
 with right_col:
     st.header("Actions")
 
-    # Option: Automatic sync on start toggle
-    auto_sync = st.checkbox("Sync from Drive on start", value=False, help="If checked the app will attempt to download notes.zip from Drive on startup (requires configured secrets).")
-
     # Manual Drive sync button & flow
     if st.button("Authenticate & Sync from Drive"):
         try:
-            drive = authenticate_gdrive()
-            run_sync_and_scan(drive=drive)
+            drive = gds.authenticate_gdrive()
+            if drive:
+                st.session_state.drive_instance = drive
+                # Sync and scan
+                ok = run_sync_and_scan(drive=drive)
+                if ok:
+                    st.session_state.drive_synced = True
+            else:
+                st.error("Authentication returned no drive object.")
         except Exception as e:
             st.error(f"Drive auth/sync error: {e}")
 
@@ -144,7 +192,10 @@ with right_col:
         run_process_embedding_queue(limit=100)
 
     # Show pending jobs
-    pending = get_pending_embedding_jobs(limit=10)
+    try:
+        pending = get_pending_embedding_jobs(limit=10)
+    except Exception:
+        pending = []
     st.write("Pending embedding jobs (top 10):")
     if pending:
         st.table(pd.DataFrame(pending, columns=["job_id", "note_id", "status"]))
@@ -155,21 +206,31 @@ with right_col:
     st.markdown("**Chroma collection**")
     st.write(f"Collection name: `{NOTES_COLLECTION_NAME}`")
     try:
-        collections = [c['name'] for c in notes_collection._client.list_collections()]  # introspect client
-        st.write("Persist dir:", PERSIST_DIRECTORY)
-        st.write("Collections found in persist dir:", collections)
+        if notes_collection is not None:
+            collections = [c['name'] for c in notes_collection._client.list_collections()]
+            st.write("Persist dir:", PERSIST_DIRECTORY)
+            st.write("Collections found in persist dir:", collections)
+        else:
+            st.write("Chroma collection object unavailable.")
     except Exception:
         st.write("Collections: (could not list, but collection object exists)")
 
 with left_col:
     # On-first-load actions: optionally auto-sync then scan
-    if auto_sync and "startup_synced" not in st.session_state:
-        st.session_state["startup_synced"] = True
-        try:
-            drive = authenticate_gdrive()
-            run_sync_and_scan(drive=drive)
-        except Exception as e:
-            st.warning(f"Auto-sync failed (you can try manual sync): {e}")
+    # SAFE BEHAVIOUR: only auto-run initial_sync if we have credentials available to avoid the client_secrets.json error
+    if not st.session_state.drive_synced:
+        if _have_drive_credentials_for_autosync():
+            try:
+                # run initial_sync (cached). It will raise if creds invalid.
+                drive = initial_sync()
+                st.session_state.drive_instance = drive
+                st.session_state.drive_synced = True
+                st.sidebar.success("✅ Synced with Google Drive!")
+            except Exception as e:
+                st.session_state.drive_synced = False
+                st.sidebar.error(f"❌ Google Drive sync failed. See Actions -> Authenticate & Sync. Details: {e}")
+        else:
+            st.sidebar.info("Auto-sync skipped (no drive credentials). Use 'Authenticate & Sync from Drive' button in Actions to sync.")
 
     # Sidebar-like note creation area (left pane top)
     st.subheader("Create a new note")
