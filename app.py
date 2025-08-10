@@ -38,15 +38,17 @@ import google_drive_sync as gds
 # --- END GOOGLE DRIVE SYNC ---
 
 # Configure the Streamlit page
-st.set_page_config(page_title="Global Product Search + Advanced Note Management", layout="wide")
-st.title("🚀 My Second Brain")
+st.set_page_config(page_title="My Second Brain", layout="wide")
 
 # --- Custom CSS for UI enhancements ---
 st.markdown("""
 <style>
-    /* Main container styling for a centered, chat-like experience */
-    .main .block-container {
-        max-width: 900px; /* Made the container slightly wider */
+    /*
+    This is a more specific selector with !important to override Streamlit's default styles.
+    It targets the main content container directly and forces the width.
+    */
+    section.main > div.block-container {
+        max-width: 1500px !important;
         padding-top: 2rem;
         margin: 0 auto;
     }
@@ -1398,33 +1400,6 @@ def ingest_local_embeddings(collection, embeddings_folder="product_embeddings_v2
 # ================================
 # ENHANCED PUTER.JS COMPONENT
 # ================================
-
-# 1. Replace the existing st.markdown block with this one to set the width to 1500px.
-
-# Replace the existing st.markdown block with this one
-
-st.markdown("""
-<style>
-    /*
-    This is a more specific selector to override Streamlit's default styles.
-    It targets the main content container directly.
-    */
-    section.main > div.block-container {
-        max-width: 1500px; /* Increased width as requested */
-        padding-top: 2rem;
-        margin: 0 auto;
-    }
-    .stSpinner > div > div {
-        border-top-color: #667eea;
-    }
-</style>
-""", unsafe_allow_html=True)
-# ================================
-# ENHANCED PUTER.JS COMPONENT
-# ================================
-
-# 2. Replace the entire create_streaming_puter_component function with this updated version.
-#    The only change is the component height from 800 to 700.
 
 def create_streaming_puter_component(prompt, model="gpt-4o-mini", stream=True):
     escaped_prompt = prompt.replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
