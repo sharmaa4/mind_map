@@ -954,8 +954,9 @@ def generate_note_embeddings_batch_with_progress(note_ids: List[int], embedding_
     
     return successful_count
 
+# <<< START SOLUTION MODIFICATION >>>
 def process_embedding_queue():
-    """Process pending embedding jobs with progress display"""
+    """Process ALL pending embedding jobs with progress display"""
     db_path = Path("notes") / "metadata" / "notes_database.db"
     if not Path(db_path).exists():
         return 0
@@ -967,22 +968,20 @@ def process_embedding_queue():
     
     conn = sqlite3.connect(str(db_path))
     
-    # Get pending jobs
+    # Get ALL pending jobs by removing the LIMIT clause
     try:
         pending_jobs = conn.execute("""
             SELECT note_id FROM embedding_jobs 
             WHERE status = 'pending' 
             ORDER BY created_at ASC
-            LIMIT 10
-        """).fetchall()
+        """).fetchall() # <-- LIMIT REMOVED
     except sqlite3.OperationalError:
-        # If table doesn't exist, get notes that need embeddings
+        # Fallback for missing columns
         pending_jobs = conn.execute("""
             SELECT id FROM notes 
             WHERE has_embedding = FALSE 
             ORDER BY timestamp DESC
-            LIMIT 10
-        """).fetchall()
+        """).fetchall() # <-- LIMIT REMOVED
     
     conn.close()
     
@@ -996,9 +995,16 @@ def process_embedding_queue():
         test_emb = embedding_model.encode("test")
         embedding_dim = len(test_emb)
     else:
-        embedding_dim = 384
+        model_dimensions = {
+            "BAAI/bge-small-en-v1.5": 384,
+            "all-mpnet-base-v2": 768,
+            "paraphrase-multilingual-mpnet-base-v2": 768,
+            "all-MiniLM-L6-v2": 384
+        }
+        embedding_dim = model_dimensions.get(embedding_model_name, 384)
     
     return generate_note_embeddings_batch_with_progress(note_ids, embedding_model, embedding_dim)
+# <<< END SOLUTION MODIFICATION >>>
 
 # ================================
 # PHASE 3+: UNIFIED SEARCH SYSTEM
@@ -1124,7 +1130,7 @@ if stats.get("pending_jobs", 0) > 0 or stats.get("processing_jobs", 0) > 0:
         if stats.get("completed_jobs", 0) > 0:
             st.success(f"✅ {stats['completed_jobs']} jobs completed")
 
-# FIXED: Embedding queue management with visual progress
+# Enhanced embedding queue management with visual progress
 if stats.get("pending_jobs", 0) > 0:
     if st.sidebar.button("🚀 Process Embedding Queue (with Progress)"):
         with st.sidebar:
@@ -1394,8 +1400,7 @@ if st.session_state.show_note_manager:
                     st.write(f"**ID:** {note['id']}")
 
 # ================================
-# Continue with the rest of your original functions...
-# (Conversation management, Puter.js integration, search UI, etc.)
+# Conversation management, Puter.js integration, search UI, etc.
 # ================================
 
 # Initialize conversation history in session state
@@ -2122,3 +2127,4 @@ st.markdown(f"""
 
 **Background Embedding Status:** ✅ Working with real-time progress display and status tracking!
 """)
+
