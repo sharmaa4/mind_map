@@ -5,6 +5,50 @@ from sentence_transformers import SentenceTransformer
 import vector_db  # Import the module for ChromaDB interactions
 from typing import List, Dict, Any, Optional
 
+
+def search_notes(
+    query_text: str,
+    embedding_model_instance: SentenceTransformer,
+    notes_collection,
+    n_results: int = 10
+) -> Dict[str, Any]:
+    """
+    Searches the notes collection only.
+
+    Args:
+        query_text (str): The user's search query.
+        embedding_model_instance (SentenceTransformer): The loaded embedding model.
+        notes_collection (chromadb.Collection): The ChromaDB collection for notes.
+        n_results (int): The number of results to fetch.
+
+    Returns:
+        Dict[str, Any]: Search results for notes.
+    """
+    if not embedding_model_instance:
+        return {"notes": [], "error": "Embedding model not available"}
+
+    try:
+        query_embedding = embedding_model_instance.encode(
+            query_text, normalize_embeddings=True
+        ).tolist()
+    except Exception as e:
+        return {"notes": [], "error": f"Failed to generate query embedding: {e}"}
+
+    note_results = {}
+    try:
+        notes_count = notes_collection.count()
+        if notes_count > 0:
+            note_results = notes_collection.query(
+                query_embeddings=[query_embedding],
+                n_results=min(n_results, notes_count),
+                include=["documents", "metadatas", "distances"]
+            )
+    except Exception as e:
+        st.error(f"Error querying notes collection: {e}")
+
+    return note_results
+
+
 def unified_search(
     query_text: str,
     embedding_model_instance: SentenceTransformer,
@@ -90,3 +134,4 @@ def unified_search(
         "notes": note_results,
         "combined": combined_results[:n_results * 2] # Return a generous number of combined results
     }
+
