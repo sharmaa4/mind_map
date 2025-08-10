@@ -75,9 +75,12 @@ def initial_sync():
         # bubble up error so caller can show a meaningful message
         raise
 
-# Helper to check if we have credentials able to auto-auth
+# replace the existing _have_drive_credentials_for_autosync function with this
 def _have_drive_credentials_for_autosync() -> bool:
-    # Service account in st.secrets
+    # Service account in st.secrets under the key you provided in .toml
+    if "gcp_service_account" in st.secrets:
+        return True
+    # Older key (if present)
     if "gdrive_service_account_json" in st.secrets:
         return True
     # Local client_secrets.json file in app root (used by LocalWebserverAuth)
