@@ -2,8 +2,8 @@
 
 import requests
 import torch
-# CORRECTED IMPORT: The models are in the fireworks.models submodule for this version.
-from colpali_engine.fireworks.models import ColIdefics3, ColIdefics3Processor
+# CORRECTED IMPORT: Importing from the specific model file within the models submodule.
+from colpali_engine.models.colidefics3 import ColIdefics3, ColIdefics3Processor
 
 
 AZURE_OPENAI_ENDPOINT = "https://engassist-eus-dev-aais.openai.azure.com/openai/deployments/hackathon-emb-emb3l-team-21-cgcwn/embeddings?api-version=2023-05-15"
