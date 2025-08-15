@@ -26,8 +26,9 @@ import shutil
 os.environ["CHROMADB_DISABLE_TELEMETRY"] = "true"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# CORRECTED IMPORT: The models are in the fireworks.models submodule for this version.
-from colpali_engine.fireworks.models import ColIdefics3, ColIdefics3Processor
+# CORRECTED IMPORT: Using the official ColPali classes.
+from colpali_engine.models import ColPali
+from colpali_engine.processor import ColPaliProcessor
 # Import the cythonized batch processing function.
 from cython_optimizations import process_image_batch
 
@@ -184,13 +185,15 @@ def main():
     # ----- Load Colpali Model & Processor in the Main Process -----
     custom_cache_dir = "./"
     print("Loading Colpali model and processor in the main process...", flush=True)
-    model = ColIdefics3.from_pretrained(
+    # CORRECTED CLASS NAME: Using ColPali instead of ColIdefics3
+    model = ColPali.from_pretrained(
         "vidore/colSmol-256M",
         torch_dtype=torch.float32,
         attn_implementation="eager",
         cache_dir=custom_cache_dir
     ).eval()
-    processor = ColIdefics3Processor.from_pretrained(
+    # CORRECTED CLASS NAME: Using ColPaliProcessor instead of ColIdefics3Processor
+    processor = ColPaliProcessor.from_pretrained(
         "vidore/colSmol-256M",
         cache_dir=custom_cache_dir
     )
