@@ -2,8 +2,9 @@
 
 import requests
 import torch
-# CORRECTED IMPORT: Importing from the specific model file within the models submodule.
-from colpali_engine.models.colidefics3 import ColIdefics3, ColIdefics3Processor
+# CORRECTED IMPORT: Using the official ColPali classes as per your findings.
+from colpali_engine.models import ColPali
+from colpali_engine.processor import ColPaliProcessor
 
 
 AZURE_OPENAI_ENDPOINT = "https://engassist-eus-dev-aais.openai.azure.com/openai/deployments/hackathon-emb-emb3l-team-21-cgcwn/embeddings?api-version=2023-05-15"
@@ -27,13 +28,15 @@ def load_colpali_model_and_processor(cache_dir="./"):
     Load the Colpali model and its processor.
     Returns a tuple: (model, processor)
     """
-    model = ColIdefics3.from_pretrained(
+    # CORRECTED CLASS NAME: Using ColPali instead of ColIdefics3
+    model = ColPali.from_pretrained(
         "vidore/colSmol-256M",
         torch_dtype=torch.float32,
         attn_implementation="eager",
         cache_dir=cache_dir
     ).eval()
-    processor = ColIdefics3Processor.from_pretrained(
+    # CORRECTED CLASS NAME: Using ColPaliProcessor instead of ColIdefics3Processor
+    processor = ColPaliProcessor.from_pretrained(
         "vidore/colSmol-256M",
         cache_dir=cache_dir
     )
@@ -45,8 +48,8 @@ def get_image_query_embedding(query_text, model, processor):
     
     Parameters:
       - query_text (str): The input query text.
-      - model: Loaded ColIdefics3 model.
-      - processor: Loaded ColIdefics3Processor.
+      - model: Loaded ColPali model.
+      - processor: Loaded ColPaliProcessor.
     
     Returns:
       - List[float]: The query embedding as a list of floats.
