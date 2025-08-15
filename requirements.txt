@@ -7,3 +7,4 @@ chromadb
 streamlit
 tqdm
 pydrive2
+colpali-engine
