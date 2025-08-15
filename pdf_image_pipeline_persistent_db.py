@@ -46,7 +46,7 @@ def process_image_batch_python(batch_data, model, processor):
     inputs = processor(images=images, return_tensors="pt")
 
     with torch.no_grad():
-        # Get image features (embeddings)
+        # Get image features (embeddings) using the correct API for ColPaliForRetrieval
         image_features = model.get_image_features(**inputs)
 
     for i, (pdf_name, page_idx) in enumerate(meta_list):
