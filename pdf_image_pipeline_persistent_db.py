@@ -26,7 +26,8 @@ import shutil
 os.environ["CHROMADB_DISABLE_TELEMETRY"] = "true"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-from colpali_engine.models import ColIdefics3, ColIdefics3Processor
+# CORRECTED IMPORT: The models are in the fireworks.models submodule for this version.
+from colpali_engine.fireworks.models import ColIdefics3, ColIdefics3Processor
 # Import the cythonized batch processing function.
 from cython_optimizations import process_image_batch
 
@@ -268,4 +269,3 @@ if __name__ == "__main__":
     # Ensure references folder is available.
     ensure_folder(REFERENCES_FOLDER)
     main()
-
