@@ -2,8 +2,9 @@
 
 import requests
 import torch
-# CORRECTED IMPORT: Using the official Hugging Face Transformers library
-from transformers import AutoProcessor, AutoModel
+# CORRECTED IMPORT: Using the specific, recommended classes from Hugging Face Transformers.
+from transformers import ColPaliForRetrieval, ColPaliProcessor
+
 
 AZURE_OPENAI_ENDPOINT = "https://engassist-eus-dev-aais.openai.azure.com/openai/deployments/hackathon-emb-emb3l-team-21-cgcwn/embeddings?api-version=2023-05-15"
 AZURE_OPENAI_API_KEY = "de7a14848db7462c9783adbcfbb0b430"  # Replace with your actual API key
@@ -23,19 +24,20 @@ def get_query_embedding(query_text: str) -> list:
 
 def load_colpali_model_and_processor(cache_dir="./"):
     """
-    Load the Colpali model and its processor from Hugging Face.
+    Load the Colpali model and its processor from Hugging Face using the correct classes.
     Returns a tuple: (model, processor)
     """
-    # Using the recommended Hugging Face model name
-    model_name = "vidore/colpali"
+    # CORRECTED MODEL NAME: Using the specific Hugging Face identifier.
+    model_name = "vidore/colpali-v1.2-hf"
     
-    # CORRECTED CLASS USAGE: Using AutoModel and AutoProcessor for robustness
-    model = AutoModel.from_pretrained(
+    # CORRECTED CLASS USAGE: Using ColPaliForRetrieval as required.
+    model = ColPaliForRetrieval.from_pretrained(
         model_name,
         torch_dtype=torch.float32,
-        trust_remote_code=True
     ).eval()
-    processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
+    
+    # CORRECTED CLASS USAGE: Using ColPaliProcessor.
+    processor = ColPaliProcessor.from_pretrained(model_name)
     
     return model, processor
 
