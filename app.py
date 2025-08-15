@@ -37,6 +37,10 @@ from typing import List, Dict, Any
 import google_drive_sync as gds
 # --- END GOOGLE DRIVE SYNC ---
 
+# --- Imports for Image Search ---
+from query_vector import load_colpali_model_and_processor, get_image_query_embedding
+
+
 # Configure the Streamlit page
 st.set_page_config(page_title="My Second Brain", layout="wide")
 
@@ -65,6 +69,10 @@ if 'drive_synced' not in st.session_state:
     st.session_state.drive_synced = False
 if 'drive_instance' not in st.session_state:
     st.session_state.drive_instance = None
+# Initialize session state for image search results
+if 'image_results' not in st.session_state:
+    st.session_state.image_results = None
+
 
 def queue_synced_notes_for_embedding():
     """
@@ -192,7 +200,7 @@ except:
 # ================================
 # TABS FOR UI
 # ================================
-tab1, tab2, tab3 = st.tabs(["🚀 Unified Search", "📝 Note Management", "⚙️ Settings & Data"])
+tab1, tab2, tab_image_search, tab3 = st.tabs(["🚀 Unified Search", "📝 Note Management", "🖼️ PDF Image Search", "⚙️ Settings & Data"])
 
 with tab3:
     st.header("⚙️ Settings & Data Management")
@@ -1624,3 +1632,144 @@ with tab3:
                 except Exception as e:
                     st.error(f"Error clearing collections: {e}")
 
+# ================================
+# PDF IMAGE SEARCH TAB
+# ================================
+def run_pdf_image_pipeline():
+    """
+    Execute the standalone PDF image pipeline using a subprocess.
+    """
+    try:
+        with st.spinner("Processing PDF for image embeddings... This may take a few minutes."):
+            result = subprocess.run(
+                ["python", "pdf_image_pipeline_persistent_db.py"],
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minutes timeout
+            )
+        if result.returncode != 0:
+            st.error("PDF image pipeline failed:")
+            st.code(result.stderr)
+        else:
+            st.success("PDF image pipeline executed successfully!")
+            st.code(result.stdout)
+    except Exception as e:
+        st.error(f"Error executing PDF image pipeline: {e}")
+
+def feed_images_by_pdf_index(query_results, pdf_folder="downloaded_pdfs"):
+    """
+    Extracts images from PDFs based on the 'ids' field in the query results.
+    """
+    results = []
+    ids_nested = query_results.get("ids", [])
+    if not ids_nested or not isinstance(ids_nested, list) or len(ids_nested) == 0:
+        return results
+
+    ids_list = ids_nested[0]
+
+    pdf_page_map = {}
+    for id_str in ids_list:
+        try:
+            if "_page_" not in id_str:
+                continue
+            pdf_name, page_str = id_str.split("_page_")
+            page_number = int(page_str.strip())
+            pdf_page_map.setdefault(pdf_name, []).append(page_number)
+        except Exception as e:
+            print(f"Error processing ID '{id_str}': {e}")
+
+    for pdf_name, page_numbers in pdf_page_map.items():
+        pdf_path = os.path.join(pdf_folder, pdf_name)
+        if not os.path.exists(pdf_path):
+            st.warning(f"PDF file not found: {pdf_path}")
+            continue
+        try:
+            doc = fitz.open(pdf_path)
+            for page_number in sorted(list(set(page_numbers))): # Sort and unique pages
+                if page_number < len(doc):
+                    page = doc.load_page(page_number)
+                    pix = page.get_pixmap(dpi=150)
+                    image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    results.append({
+                        "pdf_name": pdf_name,
+                        "page_number": page_number,
+                        "image": image
+                    })
+            doc.close()
+        except Exception as e:
+            st.error(f"Error processing PDF '{pdf_name}': {e}")
+    return results
+
+with tab_image_search:
+    st.header("🖼️ PDF Image Search")
+    st.info("This feature allows you to search for images within a PDF using a text description.")
+
+    # Step 1: PDF Upload
+    uploaded_file = st.file_uploader("Upload a PDF to process for image search", type="pdf")
+    if uploaded_file is not None:
+        # Save the uploaded PDF to a known location
+        pdf_dir = "downloaded_pdfs"
+        os.makedirs(pdf_dir, exist_ok=True)
+        # Clear old PDFs before saving a new one
+        for f in os.listdir(pdf_dir):
+            os.remove(os.path.join(pdf_dir, f))
+        
+        pdf_path = os.path.join(pdf_dir, uploaded_file.name)
+        with open(pdf_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        st.success(f"PDF '{uploaded_file.name}' uploaded successfully.")
+
+        # Step 2: Process Button
+        if st.button("Process PDF for Image Search"):
+            # Clear the old image database before processing a new PDF
+            if os.path.exists("./chroma_db_images"):
+                shutil.rmtree("./chroma_db_images")
+                st.info("Cleared previous image embedding database.")
+            
+            run_pdf_image_pipeline()
+
+    # Step 3: Search UI
+    st.markdown("---")
+    st.subheader("Search for Images")
+
+    # Load the Colpali model and processor for image queries.
+    @st.cache_resource
+    def load_colpali():
+        return load_colpali_model_and_processor()
+
+    model, processor = load_colpali()
+    
+    image_query = st.text_input("Enter your query for PDF Images:", placeholder="e.g., block diagram with an op-amp")
+    
+    if st.button("Search Images"):
+        if not image_query.strip():
+            st.warning("Please enter a valid query.")
+        else:
+            with st.spinner("Generating image query embedding and searching..."):
+                try:
+                    # Compute the query embedding using the Colpali model.
+                    query_embedding = get_image_query_embedding(image_query, model, processor)
+                    
+                    # Load the persistent image collection.
+                    client = chromadb.PersistentClient(path="./chroma_db_images", settings=Settings())
+                    collection = client.get_collection(name="pdf_images_embeddings")
+                    
+                    # Query the collection.
+                    results = collection.query(
+                        query_embeddings=[query_embedding],
+                        n_results=5,
+                        include=["metadatas", "documents"]
+                    )
+                    st.session_state.image_results = results
+                    st.success("Image query completed!")
+                except Exception as e:
+                    st.error(f"Error during image query: {e}. Did you process the PDF first?")
+
+    # Step 4: Display Results
+    if st.session_state.image_results:
+        images_info = feed_images_by_pdf_index(st.session_state.image_results, pdf_folder="downloaded_pdfs")
+        if not images_info:
+            st.info("No relevant images found in the processed PDF.")
+        for info in images_info:
+            st.image(info["image"], caption=f"Found on Page {info['page_number']+1} of {info['pdf_name']}", use_column_width=True)
+            st.markdown("---")
