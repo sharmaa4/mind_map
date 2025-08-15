@@ -2,10 +2,8 @@
 
 import requests
 import torch
-# CORRECTED IMPORT: Using the official ColPali classes as per your findings.
-from colpali_engine.models import ColPali
-from colpali_engine.processor import ColPaliProcessor
-
+# CORRECTED IMPORT: Using the official Hugging Face Transformers library
+from transformers import AutoProcessor, AutoModel
 
 AZURE_OPENAI_ENDPOINT = "https://engassist-eus-dev-aais.openai.azure.com/openai/deployments/hackathon-emb-emb3l-team-21-cgcwn/embeddings?api-version=2023-05-15"
 AZURE_OPENAI_API_KEY = "de7a14848db7462c9783adbcfbb0b430"  # Replace with your actual API key
@@ -25,38 +23,32 @@ def get_query_embedding(query_text: str) -> list:
 
 def load_colpali_model_and_processor(cache_dir="./"):
     """
-    Load the Colpali model and its processor.
+    Load the Colpali model and its processor from Hugging Face.
     Returns a tuple: (model, processor)
     """
-    # CORRECTED CLASS NAME: Using ColPali instead of ColIdefics3
-    model = ColPali.from_pretrained(
-        "vidore/colSmol-256M",
+    # Using the recommended Hugging Face model name
+    model_name = "vidore/colpali"
+    
+    # CORRECTED CLASS USAGE: Using AutoModel and AutoProcessor for robustness
+    model = AutoModel.from_pretrained(
+        model_name,
         torch_dtype=torch.float32,
-        attn_implementation="eager",
-        cache_dir=cache_dir
+        trust_remote_code=True
     ).eval()
-    # CORRECTED CLASS NAME: Using ColPaliProcessor instead of ColIdefics3Processor
-    processor = ColPaliProcessor.from_pretrained(
-        "vidore/colSmol-256M",
-        cache_dir=cache_dir
-    )
+    processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
+    
     return model, processor
 
 def get_image_query_embedding(query_text, model, processor):
     """
-    Computes a query embedding for the given query text using the Colpali model and processor.
-    
-    Parameters:
-      - query_text (str): The input query text.
-      - model: Loaded ColPali model.
-      - processor: Loaded ColPaliProcessor.
-    
-    Returns:
-      - List[float]: The query embedding as a list of floats.
+    Computes a query embedding for the given text query using the Colpali model.
     """
-    batch_query = processor.process_queries([query_text]).to("cpu")
+    # Process the text query
+    inputs = processor(text=[query_text], return_tensors="pt")
+    
     with torch.no_grad():
-        query_embedding = model(**batch_query)
-    # Average the embeddings over the sequence dimension
-    query_vector = query_embedding.mean(dim=1).squeeze(0)
-    return query_vector.tolist()
+        # Get the text features (embedding)
+        query_embedding = model.get_text_features(**inputs)
+        
+    # Squeeze to remove batch dimension and convert to list
+    return query_embedding.squeeze(0).tolist()
