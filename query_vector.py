@@ -2,7 +2,8 @@
 
 import requests
 import torch
-from colpali_engine.models import ColIdefics3, ColIdefics3Processor
+# CORRECTED IMPORT: ColIdefics3 and ColIdefics3Processor are imported directly from the engine.
+from colpali_engine import ColIdefics3, ColIdefics3Processor
 
 
 AZURE_OPENAI_ENDPOINT = "https://engassist-eus-dev-aais.openai.azure.com/openai/deployments/hackathon-emb-emb3l-team-21-cgcwn/embeddings?api-version=2023-05-15"
@@ -20,12 +21,6 @@ def get_query_embedding(query_text: str) -> list:
         return result["data"][0]["embedding"]
     else:
         raise Exception(f"Error obtaining embedding: {response.status_code} - {response.text}")
-
-#if __name__ == "__main__":
-#    # Test the query embedding function
-#    query = "Find datasheets of Wideband Low Noise Amplifier"
-#    embedding = get_query_embedding(query)
-#    print("Query embedding obtained with length:", len(embedding))
 
 def load_colpali_model_and_processor(cache_dir="./"):
     """
@@ -62,4 +57,3 @@ def get_image_query_embedding(query_text, model, processor):
     # Average the embeddings over the sequence dimension
     query_vector = query_embedding.mean(dim=1).squeeze(0)
     return query_vector.tolist()
-
