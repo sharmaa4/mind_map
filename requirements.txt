@@ -4,7 +4,6 @@ torch
 transformers
 bs4
 pymupdf
-pdf2image
 chromadb
 streamlit
 tqdm
