@@ -1,15 +1,16 @@
 # query_vector.py
 
 import requests
-import torch
-# CORRECTED IMPORT: Using the specific, recommended classes from Hugging Face Transformers.
-from transformers import ColPaliForRetrieval, ColPaliProcessor
-
+from sentence_transformers import SentenceTransformer
+from PIL import Image
 
 AZURE_OPENAI_ENDPOINT = "https://engassist-eus-dev-aais.openai.azure.com/openai/deployments/hackathon-emb-emb3l-team-21-cgcwn/embeddings?api-version=2023-05-15"
-AZURE_OPENAI_API_KEY = "de7a14848db7462c9783adbcfbb0b430"  # Replace with your actual API key
+AZURE_OPENAI_API_KEY = "de7a14848db7462c9783adbcfbb0b430"
 
 def get_query_embedding(query_text: str) -> list:
+    """
+    Generates a text embedding using the Azure OpenAI service.
+    """
     headers = {
         "Content-Type": "application/json",
         "api-key": AZURE_OPENAI_API_KEY
@@ -22,35 +23,22 @@ def get_query_embedding(query_text: str) -> list:
     else:
         raise Exception(f"Error obtaining embedding: {response.status_code} - {response.text}")
 
-def load_colpali_model_and_processor(cache_dir="./"):
+def load_image_embedding_model(cache_dir="./"):
     """
-    Load the Colpali model and its processor from Hugging Face using the correct classes.
-    Returns a tuple: (model, processor)
+    Loads a lightweight CLIP model for creating embeddings from both images and text.
     """
-    # CORRECTED MODEL NAME: Using the specific Hugging Face identifier.
-    model_name = "vidore/colpali-v1.2-hf"
-    
-    # CORRECTED CLASS USAGE: Using ColPaliForRetrieval as required.
-    model = ColPaliForRetrieval.from_pretrained(
-        model_name,
-        torch_dtype=torch.float32,
-    ).eval()
-    
-    # CORRECTED CLASS USAGE: Using ColPaliProcessor.
-    processor = ColPaliProcessor.from_pretrained(model_name)
-    
-    return model, processor
+    # Using a standard, effective CLIP model from sentence-transformers.
+    # This is much more memory-efficient than the large ColPali model.
+    model_name = "clip-ViT-B-32"
+    model = SentenceTransformer(model_name, cache_folder=cache_dir)
+    # The processor is not needed for this implementation.
+    return model, None
 
-def get_image_query_embedding(query_text, model, processor):
+def get_image_query_embedding(query_text, model, processor=None):
     """
-    Computes a query embedding for the given text query using the Colpali model.
+    Computes a query embedding for the given text query using the loaded CLIP model.
+    The processor argument is kept for API consistency but is not used.
     """
-    # Process the text query
-    inputs = processor(text=[query_text], return_tensors="pt")
-    
-    with torch.no_grad():
-        # Get the text features (embedding)
-        query_embedding = model.get_text_features(**inputs)
-        
-    # Squeeze to remove batch dimension and convert to list
-    return query_embedding.squeeze(0).tolist()
+    # The sentence-transformer CLIP model can directly encode text into a compatible vector space.
+    query_embedding = model.encode([query_text], normalize_embeddings=True)
+    return query_embedding[0].tolist()
