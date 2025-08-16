@@ -71,14 +71,15 @@ def extract_images_from_pdfs(pdf_folder, max_pdfs=MAX_PDFS, max_pages=MAX_PDF_PA
             
             # Use fitz to open the PDF from bytes
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            page_count = doc.page_count
             
-            if doc.page_count > max_pages:
-                print(f"Skipping {pdf_name} (has {doc.page_count} pages, max is {max_pages}).", flush=True)
+            if page_count > max_pages:
+                print(f"Skipping {pdf_name} (has {page_count} pages, max is {max_pages}).", flush=True)
                 doc.close()
                 continue
 
             # Render each page as a PIL image
-            for page_num in range(doc.page_count):
+            for page_num in range(page_count):
                 page = doc.load_page(page_num)
                 pix = page.get_pixmap(dpi=150)
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
@@ -87,7 +88,8 @@ def extract_images_from_pdfs(pdf_folder, max_pdfs=MAX_PDFS, max_pages=MAX_PDF_PA
             doc.close()
             extraction_time = time.time() - start
             pdf_times[pdf_name] = extraction_time
-            print(f"{pdf_name}: {len(pages)} page(s) extracted in {extraction_time:.2f} sec.", flush=True)
+            # CORRECTED: Replaced len(pages) with the correct variable, page_count.
+            print(f"{pdf_name}: {page_count} page(s) extracted in {extraction_time:.2f} sec.", flush=True)
 
         except Exception as e:
             print(f"Error extracting {pdf_name}: {e}", flush=True)
