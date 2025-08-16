@@ -38,7 +38,6 @@ import google_drive_sync as gds
 # --- END GOOGLE DRIVE SYNC ---
 
 # --- Imports for Image Search ---
-# CORRECTED IMPORT: Using the new function name from query_vector.py
 from query_vector import load_image_embedding_model, get_image_query_embedding
 
 
@@ -1642,8 +1641,9 @@ def run_pdf_image_pipeline():
     """
     try:
         with st.spinner("Processing PDF for image embeddings... This may take a few minutes."):
+            # CORRECTED: Use sys.executable to ensure the correct Python environment
             result = subprocess.run(
-                ["python", "pdf_image_pipeline_persistent_db.py"],
+                [sys.executable, "pdf_image_pipeline_persistent_db.py"],
                 capture_output=True,
                 text=True,
                 timeout=600  # 10 minutes timeout
