@@ -38,7 +38,8 @@ import google_drive_sync as gds
 # --- END GOOGLE DRIVE SYNC ---
 
 # --- Imports for Image Search ---
-from query_vector import load_colpali_model_and_processor, get_image_query_embedding
+# CORRECTED IMPORT: Using the new function name from query_vector.py
+from query_vector import load_image_embedding_model, get_image_query_embedding
 
 
 # Configure the Streamlit page
@@ -1732,12 +1733,13 @@ with tab_image_search:
     st.markdown("---")
     st.subheader("Search for Images")
 
-    # Load the Colpali model and processor for image queries.
+    # Load the image embedding model.
     @st.cache_resource
-    def load_colpali():
-        return load_colpali_model_and_processor()
-
-    model, processor = load_colpali()
+    def load_image_model():
+        # CORRECTED FUNCTION CALL: Using the new function name.
+        return load_image_embedding_model()
+    
+    model, processor = load_image_model()
     
     image_query = st.text_input("Enter your query for PDF Images:", placeholder="e.g., block diagram with an op-amp")
     
@@ -1747,7 +1749,7 @@ with tab_image_search:
         else:
             with st.spinner("Generating image query embedding and searching..."):
                 try:
-                    # Compute the query embedding using the Colpali model.
+                    # Compute the query embedding using the CLIP model.
                     query_embedding = get_image_query_embedding(image_query, model, processor)
                     
                     # Load the persistent image collection.
