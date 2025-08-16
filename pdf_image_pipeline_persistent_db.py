@@ -7,7 +7,8 @@ import pysqlite3
 print("pysqlite3 version:", pysqlite3.sqlite_version)  # Verify version is >= 3.35.0
 sys.modules["sqlite3"] = pysqlite3
 
-from pdf2image import convert_from_bytes
+# CORRECTED: Using PyMuPDF (fitz) instead of pdf2image to avoid system dependencies
+import fitz 
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
@@ -25,7 +26,7 @@ from query_vector import load_image_embedding_model
 # ------ Parameters ------
 MAX_PDF_PAGES = 300
 MAX_PDFS = 1
-BATCH_SIZE = 32  # Batch size can be larger with a more efficient model
+BATCH_SIZE = 16
 THREAD_WORKERS = 4
 REFERENCES_FOLDER = "./references_images"
 
@@ -41,8 +42,7 @@ def process_image_batch_python(batch_data, model):
     images = [item[2] for item in batch_data]
     meta_list = [(item[0], item[1]) for item in batch_data]
 
-    # The CLIP model can directly encode a list of PIL images
-    image_embeddings = model.encode(images)
+    image_embeddings = model.encode(images, normalize_embeddings=True)
 
     for i, (pdf_name, page_idx) in enumerate(meta_list):
          results.append({
@@ -55,7 +55,7 @@ def process_image_batch_python(batch_data, model):
 
 def extract_images_from_pdfs(pdf_folder, max_pdfs=MAX_PDFS, max_pages=MAX_PDF_PAGES):
     """
-    Extracts images from PDFs.
+    Extracts images from PDFs using PyMuPDF (fitz).
     """
     all_pages = []
     pdf_times = {}
@@ -68,15 +68,23 @@ def extract_images_from_pdfs(pdf_folder, max_pdfs=MAX_PDFS, max_pages=MAX_PDF_PA
         try:
             with open(pdf_path, "rb") as f:
                 pdf_bytes = f.read()
-            pages = convert_from_bytes(pdf_bytes, dpi=150)
             
-            if len(pages) > max_pages:
-                print(f"Skipping {pdf_name} (has {len(pages)} pages, max is {max_pages}).", flush=True)
+            # Use fitz to open the PDF from bytes
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            
+            if doc.page_count > max_pages:
+                print(f"Skipping {pdf_name} (has {doc.page_count} pages, max is {max_pages}).", flush=True)
+                doc.close()
                 continue
 
-            for idx, page_img in enumerate(pages):
-                all_pages.append((pdf_name, idx, page_img))
-
+            # Render each page as a PIL image
+            for page_num in range(doc.page_count):
+                page = doc.load_page(page_num)
+                pix = page.get_pixmap(dpi=150)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                all_pages.append((pdf_name, page_num, img))
+            
+            doc.close()
             extraction_time = time.time() - start
             pdf_times[pdf_name] = extraction_time
             print(f"{pdf_name}: {len(pages)} page(s) extracted in {extraction_time:.2f} sec.", flush=True)
@@ -104,22 +112,22 @@ def main():
         return
 
     print("Loading CLIP model via sentence-transformers...", flush=True)
-    model, _ = load_image_embedding_model() # Processor is not needed
+    model, _ = load_image_embedding_model()
 
     inference_start = time.time()
     all_embeddings = []
     batches = list(batch_data(all_pages, BATCH_SIZE))
     print(f"Processing {len(batches)} batches with batch size {BATCH_SIZE}...", flush=True)
 
-    # We don't need ThreadPoolExecutor if running on a single GPU, as sentence-transformers handles batching efficiently.
-    # If you have multiple GPUs, you could re-introduce it.
-    for i, batch in enumerate(batches):
-        try:
-            batch_results = process_image_batch_python(batch, model)
-            all_embeddings.extend(batch_results)
-            print(f"Completed batch {i+1}/{len(batches)}: Processed {len(batch_results)} embeddings.", flush=True)
-        except Exception as e:
-            print(f"Error processing a batch: {e}", flush=True)
+    with ThreadPoolExecutor(max_workers=THREAD_WORKERS) as executor:
+        futures = {executor.submit(process_image_batch_python, batch, model): batch for batch in batches}
+        for i, future in enumerate(as_completed(futures)):
+            try:
+                batch_results = future.result()
+                all_embeddings.extend(batch_results)
+                print(f"Completed batch {i+1}/{len(batches)}: Processed {len(batch_results)} embeddings.", flush=True)
+            except Exception as e:
+                print(f"Error processing a batch: {e}", flush=True)
     
     inference_end = time.time()
     print(f"Total inference time: {inference_end - inference_start:.2f} sec.", flush=True)
