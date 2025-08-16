@@ -24,7 +24,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 from query_vector import load_image_embedding_model
 
 # ------ Parameters ------
-MAX_PDF_PAGES = 300
+MAX_PDF_PAGES = 1000
 MAX_PDFS = 1
 BATCH_SIZE = 16
 THREAD_WORKERS = 4
