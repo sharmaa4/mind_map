@@ -27,7 +27,7 @@ from query_vector import load_image_embedding_model
 MAX_PDF_PAGES = 1000
 MAX_PDFS = 1
 BATCH_SIZE = 4
-THREAD_WORKERS = 2
+THREAD_WORKERS = 1
 REFERENCES_FOLDER = "./references_images"
 
 def ensure_folder(folder):
