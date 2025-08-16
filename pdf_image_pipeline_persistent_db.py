@@ -20,12 +20,12 @@ os.environ["CHROMADB_DISABLE_TELEMETRY"] = "true"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Import the corrected model loading function
-from query_vector import load_colpali_model_and_processor
+from query_vector import load_image_embedding_model
 
 # ------ Parameters ------
 MAX_PDF_PAGES = 300
 MAX_PDFS = 1
-BATCH_SIZE = 16  # Reduced batch size for stability with the new model
+BATCH_SIZE = 32  # Batch size can be larger with a more efficient model
 THREAD_WORKERS = 4
 REFERENCES_FOLDER = "./references_images"
 
@@ -33,26 +33,21 @@ def ensure_folder(folder):
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-def process_image_batch_python(batch_data, model, processor):
+def process_image_batch_python(batch_data, model):
     """
-    Processes a batch of page images using the Hugging Face Transformers model.
-    This replaces the old Cython function.
+    Processes a batch of page images using the SentenceTransformer (CLIP) model.
     """
     results = []
     images = [item[2] for item in batch_data]
     meta_list = [(item[0], item[1]) for item in batch_data]
 
-    # Process images with the processor
-    inputs = processor(images=images, return_tensors="pt")
-
-    with torch.no_grad():
-        # Get image features (embeddings) using the correct API for ColPaliForRetrieval
-        image_features = model.get_image_features(**inputs)
+    # The CLIP model can directly encode a list of PIL images
+    image_embeddings = model.encode(images)
 
     for i, (pdf_name, page_idx) in enumerate(meta_list):
          results.append({
              "id": f"{pdf_name}_page_{page_idx}",
-             "embedding": image_features[i].tolist(),
+             "embedding": image_embeddings[i].tolist(),
              "metadata": {"pdf_name": pdf_name, "page_idx": page_idx},
              "document": f"Image from page {page_idx + 1} of {pdf_name}"
          })
@@ -108,23 +103,23 @@ def main():
         print("No pages to process. Exiting.")
         return
 
-    print("Loading Colpali model and processor from Hugging Face...", flush=True)
-    model, processor = load_colpali_model_and_processor()
+    print("Loading CLIP model via sentence-transformers...", flush=True)
+    model, _ = load_image_embedding_model() # Processor is not needed
 
     inference_start = time.time()
     all_embeddings = []
     batches = list(batch_data(all_pages, BATCH_SIZE))
     print(f"Processing {len(batches)} batches with batch size {BATCH_SIZE}...", flush=True)
 
-    with ThreadPoolExecutor(max_workers=THREAD_WORKERS) as executor:
-        futures = {executor.submit(process_image_batch_python, batch, model, processor): batch for batch in batches}
-        for i, future in enumerate(as_completed(futures)):
-            try:
-                batch_results = future.result()
-                all_embeddings.extend(batch_results)
-                print(f"Completed batch {i+1}/{len(batches)}: Processed {len(batch_results)} embeddings.", flush=True)
-            except Exception as e:
-                print(f"Error processing a batch: {e}", flush=True)
+    # We don't need ThreadPoolExecutor if running on a single GPU, as sentence-transformers handles batching efficiently.
+    # If you have multiple GPUs, you could re-introduce it.
+    for i, batch in enumerate(batches):
+        try:
+            batch_results = process_image_batch_python(batch, model)
+            all_embeddings.extend(batch_results)
+            print(f"Completed batch {i+1}/{len(batches)}: Processed {len(batch_results)} embeddings.", flush=True)
+        except Exception as e:
+            print(f"Error processing a batch: {e}", flush=True)
     
     inference_end = time.time()
     print(f"Total inference time: {inference_end - inference_start:.2f} sec.", flush=True)
@@ -132,12 +127,11 @@ def main():
     client = chromadb.PersistentClient(path="./chroma_db_images", settings=Settings())
     collection_name = "pdf_images_embeddings"
     
-    # Delete the collection if it exists to ensure a fresh start
     try:
         client.delete_collection(name=collection_name)
         print(f"Deleted existing collection: '{collection_name}'")
     except Exception:
-        pass # Collection didn't exist, which is fine.
+        pass
 
     collection = client.create_collection(name=collection_name)
     print(f"Created new ChromaDB collection: {collection_name}", flush=True)
